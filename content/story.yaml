@@ -1,0 +1,44 @@
+flow:
+  start: intro
+
+nodes:
+  intro:
+    file: 01-intro.md
+    type: story
+    next: first-choice
+
+  first-choice:
+    file: 02-first-choice.md
+    type: decision
+    # Next determined by voting
+
+  install-kcp:
+    file: 03a-install-kcp.md
+    type: story
+    # This would continue to more chapters...
+
+  minikube-path:
+    file: 03b-minikube-path.md
+    type: story
+    # This would continue to more chapters...
+
+  coffee-disaster:
+    file: 03c-coffee-disaster.md
+    type: game-over
+    # Dead end - presentation would restart or end
+
+  manager-advice:
+    file: 03d-manager-advice.md
+    type: story
+    # This leads to second choice
+    next: second-choice
+
+  second-choice:
+    file: 04-second-choice.md
+    type: decision
+    # Next determined by voting
+
+  quit:
+    file: 04a-quit.md
+    type: game-over
+    # Dead end - gave up

@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎬 Kubernetes Quest - Presenter</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        @keyframes fade-in {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in {
+            animation: fade-in 0.5s ease-out;
+        }
+        .chapter-content {
+            font-size: 1.25rem;
+            line-height: 1.8;
+        }
+        .chapter-content h1 {
+            font-size: 3rem;
+            font-weight: bold;
+            margin-bottom: 1.5rem;
+            color: #fbbf24;
+        }
+        .chapter-content h2 {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-top: 2rem;
+            margin-bottom: 1rem;
+            color: #60a5fa;
+        }
+        .chapter-content p {
+            margin-bottom: 1rem;
+        }
+        .chapter-content code {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 0.2rem 0.4rem;
+            border-radius: 0.25rem;
+            font-family: 'Courier New', monospace;
+        }
+        .chapter-content pre {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 1rem;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+            margin: 1rem 0;
+        }
+        .chapter-content pre code {
+            background: transparent;
+            padding: 0;
+        }
+        .danger-box {
+            background: rgba(220, 38, 38, 0.2);
+            border-left: 4px solid #ef4444;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 0.5rem;
+        }
+        .success-box {
+            background: rgba(34, 197, 94, 0.2);
+            border-left: 4px solid #22c55e;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 0.5rem;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-gray-900 via-purple-900 to-violet-900 min-h-screen text-white">
+    <div x-data="presenterApp()" x-init="init()" class="h-screen flex flex-col">
+        <!-- Control Bar -->
+        <div class="bg-black/50 backdrop-blur-lg border-b border-white/10 p-4">
+            <div class="container mx-auto flex justify-between items-center">
+                <div class="flex items-center space-x-4">
+                    <h1 class="text-2xl font-bold">⚓ Kubernetes Quest</h1>
+                    <div class="flex items-center space-x-2">
+                        <div :class="connected ? 'bg-green-500' : 'bg-red-500'" class="w-3 h-3 rounded-full"></div>
+                        <span class="text-sm" x-text="connected ? 'Connected' : 'Disconnected'"></span>
+                    </div>
+                </div>
+                
+                <div class="flex items-center space-x-4">
+                    <!-- Voting Status -->
+                    <div x-show="votingActive" class="bg-yellow-500 text-black px-4 py-2 rounded-lg font-bold">
+                        🗳️ Voting Active: <span x-text="timeRemaining + 's'"></span>
+                    </div>
+                    
+                    <!-- Total Votes -->
+                    <div class="bg-blue-500 px-4 py-2 rounded-lg">
+                        <span class="font-bold" x-text="totalVotes"></span> votes
+                    </div>
+
+                    <!-- Control Buttons -->
+                    <button @click="restartStory()" 
+                            class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-bold transition-colors">
+                        🔄 Restart Story
+                    </button>
+                    <button @click="goBack()" 
+                            x-show="canGoBack"
+                            class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-bold transition-colors">
+                        ⬅️ Go Back
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="flex-1 overflow-y-auto">
+            <div class="container mx-auto px-8 py-12 max-w-5xl">
+                <!-- Chapter Content -->
+                <div x-show="currentChapter" class="fade-in mb-12">
+                    <div class="chapter-content" x-html="chapterHTML"></div>
+                </div>
+
+                <!-- Decision Point -->
+                <div x-show="isDecisionPoint && !votingActive && !winner" class="text-center space-x-4">
+                    <button @click="startVoting()" 
+                            class="bg-gradient-to-r from-yellow-500 to-orange-500 text-black font-bold text-xl px-8 py-4 rounded-xl hover:scale-105 transition-transform">
+                        🗳️ Start Voting
+                    </button>
+                    <button @click="restartVoting()" 
+                            x-show="hasVoted"
+                            class="bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold text-xl px-8 py-4 rounded-xl hover:scale-105 transition-transform">
+                        🔄 Restart Voting
+                    </button>
+                </div>
+
+                <!-- Voting in Progress -->
+                <div x-show="votingActive" class="fade-in">
+                    <div class="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20">
+                        <h2 class="text-3xl font-bold text-center mb-6">🗳️ Voting in Progress</h2>
+                        
+                        <!-- Progress Bar -->
+                        <div class="mb-8">
+                            <div class="w-full bg-white/20 rounded-full h-4 overflow-hidden">
+                                <div class="bg-gradient-to-r from-green-400 to-blue-500 h-full transition-all duration-1000"
+                                     :style="'width: ' + (timeRemaining / totalTime * 100) + '%'"></div>
+                            </div>
+                            <p class="text-center text-2xl font-bold mt-4" x-text="timeRemaining + ' seconds remaining'"></p>
+                        </div>
+
+                        <!-- Real-time Results -->
+                        <div class="space-y-4">
+                            <template x-for="choice in choices" :key="choice.ID">
+                                <div class="bg-black/30 rounded-xl p-6">
+                                    <div class="flex justify-between items-center mb-3">
+                                        <div class="flex items-center space-x-3">
+                                            <span class="text-3xl" x-text="choice.Icon || '🔹'"></span>
+                                            <span class="text-xl font-bold" x-text="choice.Label"></span>
+                                        </div>
+                                        <div class="text-right">
+                                            <div class="text-3xl font-bold text-yellow-400" x-text="results[choice.ID] || 0"></div>
+                                            <div class="text-sm text-purple-300" x-text="getPercentage(choice.ID) + '%'"></div>
+                                        </div>
+                                    </div>
+                                    <div class="w-full bg-white/20 rounded-full h-3 overflow-hidden">
+                                        <div class="bg-gradient-to-r from-blue-400 to-purple-500 h-full transition-all duration-500"
+                                             :style="'width: ' + getPercentage(choice.ID) + '%'"></div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results -->
+                <div x-show="!votingActive && winner" class="fade-in">
+                    <div class="bg-gradient-to-br from-yellow-500/20 to-orange-500/20 backdrop-blur-lg rounded-2xl p-8 border-2 border-yellow-500">
+                        <h2 class="text-4xl font-bold text-center mb-8">🎉 The Team Has Decided!</h2>
+                        
+                        <div class="text-center mb-8">
+                            <div class="text-6xl mb-4" x-text="getWinnerIcon()"></div>
+                            <div class="text-3xl font-bold text-yellow-400" x-text="getWinnerLabel()"></div>
+                        </div>
+
+                        <!-- Final Results -->
+                        <div class="space-y-4 mb-8">
+                            <template x-for="choice in choices" :key="choice.ID">
+                                <div :class="choice.ID === winner ? 'bg-yellow-500/30 ring-2 ring-yellow-400' : 'bg-black/30'" 
+                                     class="rounded-xl p-6">
+                                    <div class="flex justify-between items-center mb-3">
+                                        <div class="flex items-center space-x-3">
+                                            <span class="text-3xl" x-text="choice.Icon || '🔹'"></span>
+                                            <span class="text-xl font-bold" x-text="choice.Label"></span>
+                                        </div>
+                                        <div class="text-right">
+                                            <div class="text-3xl font-bold" :class="choice.ID === winner ? 'text-yellow-400' : 'text-white'" 
+                                                 x-text="results[choice.ID] || 0"></div>
+                                            <div class="text-sm text-purple-300" x-text="getPercentage(choice.ID) + '%'"></div>
+                                        </div>
+                                    </div>
+                                    <div class="w-full bg-white/20 rounded-full h-3 overflow-hidden">
+                                        <div :class="choice.ID === winner ? 'bg-gradient-to-r from-yellow-400 to-orange-500' : 'bg-gradient-to-r from-blue-400 to-purple-500'"
+                                             class="h-full transition-all duration-1000"
+                                             :style="'width: ' + getPercentage(choice.ID) + '%'"></div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+
+                        <div class="text-center">
+                            <button @click="advanceStory()" 
+                                    class="bg-gradient-to-r from-green-500 to-blue-500 text-white font-bold text-xl px-8 py-4 rounded-xl hover:scale-105 transition-transform">
+                                ➡️ Continue the Adventure
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Simple Continue Button (for non-decision chapters) -->
+                <div x-show="!isDecisionPoint && currentChapter && !isTerminal" class="text-center mt-8">
+                    <button @click="advanceStory()" 
+                            class="bg-gradient-to-r from-blue-500 to-purple-500 text-white font-bold text-xl px-8 py-4 rounded-xl hover:scale-105 transition-transform">
+                        ➡️ Continue
+                    </button>
+                </div>
+
+                <!-- Terminal/End State -->
+                <div x-show="isTerminal" class="text-center mt-8 space-y-4">
+                    <div class="bg-gradient-to-br from-purple-500/20 to-pink-500/20 backdrop-blur-lg rounded-2xl p-8 border-2 border-purple-500">
+                        <h2 class="text-4xl font-bold mb-4">🎭 The End</h2>
+                        <p class="text-xl mb-6">This path has reached its conclusion.</p>
+                        <div class="space-x-4">
+                            <button @click="goBack()" 
+                                    x-show="canGoBack"
+                                    class="bg-gradient-to-r from-gray-600 to-gray-700 text-white font-bold text-xl px-8 py-4 rounded-xl hover:scale-105 transition-transform">
+                                ⬅️ Try Different Path
+                            </button>
+                            <button @click="restartStory()" 
+                                    class="bg-gradient-to-r from-green-500 to-blue-500 text-white font-bold text-xl px-8 py-4 rounded-xl hover:scale-105 transition-transform">
+                                🔄 Restart Adventure
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function presenterApp() {
+            return {
+                ws: null,
+                connected: false,
+                currentChapter: null,
+                chapterHTML: '',
+                isDecisionPoint: false,
+                votingActive: false,
+                choices: [],
+                results: {},
+                totalVotes: 0,
+                winner: null,
+                timeRemaining: 0,
+                totalTime: 60,
+                timerInterval: null,
+                isTerminal: false,
+                hasVoted: false,
+                canGoBack: false,
+
+                init() {
+                    this.loadCurrentChapter();
+                    this.connectWebSocket();
+                },
+
+                async loadCurrentChapter() {
+                    try {
+                        const response = await fetch('/api/chapter/current');
+                        const data = await response.json();
+                        this.displayChapter(data);
+                    } catch (error) {
+                        console.error('Failed to load chapter:', error);
+                    }
+                },
+
+                displayChapter(chapter) {
+                    this.currentChapter = chapter;
+                    this.chapterHTML = chapter.content;
+                    this.isDecisionPoint = chapter.metadata.Type === 'decision';
+                    this.isTerminal = chapter.metadata.Terminal === true || chapter.metadata.Type === 'game-over';
+                    this.choices = chapter.metadata.Choices || [];
+                    this.votingActive = false;
+                    this.winner = null;
+                    this.results = {};
+                    this.totalVotes = 0;
+                    this.hasVoted = false;
+                    
+                    // Update canGoBack from server response
+                    if (chapter.can_go_back !== undefined) {
+                        this.canGoBack = chapter.can_go_back;
+                    }
+                },
+
+                connectWebSocket() {
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsUrl = `${protocol}//${window.location.host}/ws`;
+                    
+                    this.ws = new WebSocket(wsUrl);
+
+                    this.ws.onopen = () => {
+                        console.log('WebSocket connected');
+                        this.connected = true;
+                    };
+
+                    this.ws.onmessage = (event) => {
+                        const message = JSON.parse(event.data);
+                        this.handleMessage(message);
+                    };
+
+                    this.ws.onclose = () => {
+                        console.log('WebSocket disconnected');
+                        this.connected = false;
+                        setTimeout(() => this.connectWebSocket(), 3000);
+                    };
+
+                    this.ws.onerror = (error) => {
+                        console.error('WebSocket error:', error);
+                    };
+                },
+
+                handleMessage(message) {
+                    console.log('Received message:', message);
+
+                    switch (message.type) {
+                        case 'voting_started':
+                            this.onVotingStarted(message.payload);
+                            break;
+                        case 'vote_update':
+                            this.updateResults(message.payload);
+                            break;
+                        case 'voting_ended':
+                            this.onVotingEnded(message.payload);
+                            break;
+                        case 'chapter_changed':
+                            this.displayChapter(message.payload);
+                            break;
+                        case 'story_restarted':
+                            this.displayChapter(message.payload);
+                            this.canGoBack = false;
+                            break;
+                        case 'voting_reset':
+                            this.votingActive = false;
+                            this.winner = null;
+                            this.results = {};
+                            this.totalVotes = 0;
+                            this.hasVoted = false;
+                            break;
+                    }
+                },
+
+                async startVoting() {
+                    if (!this.isDecisionPoint || this.choices.length === 0) {
+                        return;
+                    }
+
+                    const duration = this.currentChapter.metadata.Timer || 60;
+                    const choiceIds = this.choices.map(c => c.ID);
+
+                    try {
+                        const response = await fetch('/api/start-voting', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                question_id: this.currentChapter.id,
+                                choices: choiceIds,
+                                duration: duration
+                            })
+                        });
+
+                        if (!response.ok) {
+                            console.error('Failed to start voting');
+                        }
+                    } catch (error) {
+                        console.error('Error starting voting:', error);
+                    }
+                },
+
+                onVotingStarted(payload) {
+                    this.votingActive = true;
+                    this.totalTime = payload.duration || 60;
+                    this.timeRemaining = this.totalTime;
+                    this.results = {};
+                    this.totalVotes = 0;
+                    this.winner = null;
+
+                    if (this.timerInterval) clearInterval(this.timerInterval);
+                    this.timerInterval = setInterval(() => {
+                        if (this.timeRemaining > 0) {
+                            this.timeRemaining--;
+                        }
+                    }, 1000);
+                },
+
+                updateResults(payload) {
+                    this.results = payload.results || {};
+                    this.totalVotes = payload.total || 0;
+                },
+
+                onVotingEnded(payload) {
+                    this.votingActive = false;
+                    this.results = payload.results || {};
+                    this.winner = payload.winner;
+                    this.totalVotes = Object.values(this.results).reduce((a, b) => a + b, 0);
+                    this.hasVoted = true;
+
+                    if (this.timerInterval) {
+                        clearInterval(this.timerInterval);
+                        this.timerInterval = null;
+                    }
+                },
+
+                async advanceStory() {
+                    try {
+                        const payload = this.winner ? { choice_id: this.winner } : {};
+                        const response = await fetch('/api/advance', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.displayChapter(data);
+                            // canGoBack is now set by displayChapter from server response
+                        } else {
+                            console.error('Failed to advance story');
+                        }
+                    } catch (error) {
+                        console.error('Error advancing story:', error);
+                    }
+                },
+
+                async restartStory() {
+                    if (!confirm('Are you sure you want to restart the entire story?')) {
+                        return;
+                    }
+
+                    try {
+                        const response = await fetch('/api/restart', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.displayChapter(data);
+                            this.canGoBack = false;
+                        } else {
+                            console.error('Failed to restart story');
+                        }
+                    } catch (error) {
+                        console.error('Error restarting story:', error);
+                    }
+                },
+
+                async restartVoting() {
+                    if (!confirm('Are you sure you want to restart the current vote?')) {
+                        return;
+                    }
+
+                    try {
+                        const response = await fetch('/api/restart-voting', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+
+                        if (response.ok) {
+                            this.votingActive = false;
+                            this.winner = null;
+                            this.results = {};
+                            this.totalVotes = 0;
+                            this.hasVoted = false;
+                        } else {
+                            console.error('Failed to restart voting');
+                        }
+                    } catch (error) {
+                        console.error('Error restarting voting:', error);
+                    }
+                },
+
+                async goBack() {
+                    try {
+                        const response = await fetch('/api/go-back', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.displayChapter(data);
+                            // Don't automatically set canGoBack here - let the WebSocket message handle it
+                        } else {
+                            const errorText = await response.text();
+                            if (response.status === 400 && errorText.includes('no history')) {
+                                this.canGoBack = false;
+                            }
+                            console.error('Failed to go back:', errorText);
+                        }
+                    } catch (error) {
+                        console.error('Error going back:', error);
+                    }
+                },
+
+                getPercentage(choiceId) {
+                    if (this.totalVotes === 0) return 0;
+                    return ((this.results[choiceId] || 0) / this.totalVotes * 100).toFixed(1);
+                },
+
+                getWinnerLabel() {
+                    if (!this.winner) return '';
+                    const choice = this.choices.find(c => c.id === this.winner);
+                    return choice ? choice.Label : '';
+                },
+
+                getWinnerIcon() {
+                    if (!this.winner) return '';
+                    const choice = this.choices.find(c => c.id === this.winner);
+                    return choice ? (choice.Icon || '🎯') : '🎯';
+                }
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎮 Kubernetes Quest - Vote!</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse-slow {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .pulse-slow {
+            animation: pulse-slow 2s ease-in-out infinite;
+        }
+        @keyframes slide-in {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .slide-in {
+            animation: slide-in 0.3s ease-out;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 min-h-screen">
+    <div x-data="voterApp()" x-init="init()" class="container mx-auto px-4 py-8 max-w-md">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-white mb-2">⚓ Kubernetes Quest</h1>
+            <p class="text-purple-200">Choose Your Adventure</p>
+        </div>
+
+        <!-- Connection Status -->
+        <div class="mb-4 text-center">
+            <div x-show="!connected" class="bg-red-500 text-white px-4 py-2 rounded-lg pulse-slow">
+                🔌 Connecting...
+            </div>
+            <div x-show="connected && !votingActive" class="bg-blue-500 text-white px-4 py-2 rounded-lg">
+                ✅ Connected - Waiting for next question...
+            </div>
+        </div>
+
+        <!-- Voting Interface -->
+        <div x-show="votingActive" class="slide-in">
+            <!-- Question -->
+            <div class="bg-white/10 backdrop-blur-lg rounded-2xl p-6 mb-6 border border-white/20">
+                <h2 class="text-2xl font-bold text-white mb-4 text-center">
+                    What should we do next?
+                </h2>
+                
+                <!-- Timer -->
+                <div class="mb-4">
+                    <div class="flex justify-between text-sm text-purple-200 mb-2">
+                        <span>Time remaining</span>
+                        <span x-text="timeRemaining + 's'"></span>
+                    </div>
+                    <div class="w-full bg-white/20 rounded-full h-3 overflow-hidden">
+                        <div class="bg-gradient-to-r from-green-400 to-blue-500 h-full transition-all duration-1000"
+                             :style="'width: ' + (timeRemaining / totalTime * 100) + '%'"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Choices -->
+            <div class="space-y-4">
+                <template x-for="choice in choices" :key="choice.ID">
+                    <button @click="vote(choice.ID)"
+                            :disabled="hasVoted && selectedChoice !== choice.ID"
+                            :class="{
+                                'bg-gradient-to-r from-blue-500 to-purple-600 ring-4 ring-yellow-400': selectedChoice === choice.ID,
+                                'bg-white/10 hover:bg-white/20': selectedChoice !== choice.ID,
+                                'opacity-50 cursor-not-allowed': hasVoted && selectedChoice !== choice.ID
+                            }"
+                            class="w-full backdrop-blur-lg rounded-xl p-5 border border-white/20 transition-all transform hover:scale-105 active:scale-95">
+                        <div class="flex items-center justify-between">
+                            <div class="text-left flex-1">
+                                <div class="text-2xl mb-2" x-text="choice.Icon || '🔹'"></div>
+                                <div class="text-lg font-bold text-white" x-text="choice.Label"></div>
+                                <div class="text-sm text-purple-200" x-text="choice.Description"></div>
+                            </div>
+                            <div class="ml-4">
+                                <div x-show="selectedChoice === choice.ID" class="text-4xl">✓</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Vote Count Bar -->
+                        <div x-show="showResults" class="mt-3">
+                            <div class="flex justify-between text-sm text-white mb-1">
+                                <span x-text="results[choice.ID] || 0">0</span>
+                                <span x-text="((results[choice.ID] || 0) / totalVotes * 100).toFixed(0) + '%'">0%</span>
+                            </div>
+                            <div class="w-full bg-white/20 rounded-full h-2 overflow-hidden">
+                                <div class="bg-gradient-to-r from-yellow-400 to-orange-500 h-full transition-all duration-500"
+                                     :style="'width: ' + ((results[choice.ID] || 0) / totalVotes * 100) + '%'"></div>
+                            </div>
+                        </div>
+                    </button>
+                </template>
+            </div>
+
+            <!-- Vote Confirmation -->
+            <div x-show="hasVoted" class="mt-6 text-center slide-in">
+                <div class="bg-green-500 text-white px-6 py-3 rounded-lg inline-block">
+                    ✅ Vote Recorded!
+                </div>
+            </div>
+        </div>
+
+        <!-- Results View -->
+        <div x-show="!votingActive && winner" class="slide-in">
+            <div class="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20 text-center">
+                <h2 class="text-3xl font-bold text-white mb-4">🎉 The Team Chose...</h2>
+                <div class="text-5xl mb-4" x-text="getWinnerIcon()"></div>
+                <div class="text-2xl font-bold text-yellow-400 mb-6" x-text="getWinnerLabel()"></div>
+                
+                <!-- Results Bars -->
+                <div class="space-y-3 mb-6">
+                    <template x-for="choice in choices" :key="choice.ID">
+                        <div class="text-left">
+                            <div class="flex justify-between text-sm text-white mb-1">
+                                <span x-text="choice.Label"></span>
+                                <span x-text="((results[choice.ID] || 0) / totalVotes * 100).toFixed(0) + '%'">0%</span>
+                            </div>
+                            <div class="w-full bg-white/20 rounded-full h-3 overflow-hidden">
+                                <div :class="choice.ID === winner ? 'bg-gradient-to-r from-yellow-400 to-orange-500' : 'bg-gradient-to-r from-blue-400 to-purple-500'"
+                                     class="h-full transition-all duration-1000"
+                                     :style="'width: ' + ((results[choice.ID] || 0) / totalVotes * 100) + '%'"></div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <p class="text-purple-200">Waiting for the next chapter...</p>
+            </div>
+        </div>
+
+        <!-- User ID Display -->
+        <div class="mt-8 text-center text-purple-300 text-sm">
+            <p>Your ID: <span class="font-mono" x-text="voterId"></span></p>
+        </div>
+    </div>
+
+    <script>
+        function voterApp() {
+            return {
+                ws: null,
+                connected: false,
+                voterId: '',
+                votingActive: false,
+                choices: [],
+                selectedChoice: null,
+                hasVoted: false,
+                results: {},
+                totalVotes: 0,
+                winner: null,
+                timeRemaining: 0,
+                totalTime: 60,
+                showResults: false,
+                timerInterval: null,
+
+                init() {
+                    this.voterId = this.getOrCreateVoterId();
+                    this.connectWebSocket();
+                },
+
+                getOrCreateVoterId() {
+                    let id = localStorage.getItem('voter_id');
+                    if (!id) {
+                        id = 'voter_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+                        localStorage.setItem('voter_id', id);
+                    }
+                    return id;
+                },
+
+                connectWebSocket() {
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsUrl = `${protocol}//${window.location.host}/ws`;
+                    
+                    this.ws = new WebSocket(wsUrl);
+
+                    this.ws.onopen = () => {
+                        console.log('WebSocket connected');
+                        this.connected = true;
+                    };
+
+                    this.ws.onmessage = (event) => {
+                        const message = JSON.parse(event.data);
+                        this.handleMessage(message);
+                    };
+
+                    this.ws.onclose = () => {
+                        console.log('WebSocket disconnected');
+                        this.connected = false;
+                        // Reconnect after 3 seconds
+                        setTimeout(() => this.connectWebSocket(), 3000);
+                    };
+
+                    this.ws.onerror = (error) => {
+                        console.error('WebSocket error:', error);
+                    };
+                },
+
+                handleMessage(message) {
+                    console.log('Received message:', message);
+
+                    switch (message.type) {
+                        case 'state':
+                            this.updateState(message.payload);
+                            break;
+                        case 'voting_started':
+                            this.startVoting(message.payload);
+                            break;
+                        case 'vote_update':
+                            this.updateResults(message.payload);
+                            break;
+                        case 'voting_ended':
+                            this.endVoting(message.payload);
+                            break;
+                        case 'chapter_changed':
+                            this.resetForNewChapter();
+                            break;
+                        case 'story_restarted':
+                            this.resetForNewChapter();
+                            break;
+                        case 'voting_reset':
+                            this.resetForNewChapter();
+                            break;
+                    }
+                },
+
+                updateState(payload) {
+                    this.votingActive = payload.voting_active || false;
+                    if (payload.results) {
+                        this.results = payload.results;
+                        this.totalVotes = payload.total || 0;
+                    }
+                },
+
+                startVoting(payload) {
+                    this.votingActive = true;
+                    this.choices = payload.choices || [];
+                    this.selectedChoice = null;
+                    this.hasVoted = false;
+                    this.results = {};
+                    this.totalVotes = 0;
+                    this.winner = null;
+                    this.showResults = false;
+                    this.totalTime = payload.duration || 60;
+                    this.timeRemaining = this.totalTime;
+
+                    // Start timer
+                    if (this.timerInterval) clearInterval(this.timerInterval);
+                    this.timerInterval = setInterval(() => {
+                        if (this.timeRemaining > 0) {
+                            this.timeRemaining--;
+                        }
+                        // Show results in last 10 seconds
+                        if (this.timeRemaining <= 10) {
+                            this.showResults = true;
+                        }
+                    }, 1000);
+                },
+
+                updateResults(payload) {
+                    this.results = payload.results || {};
+                    this.totalVotes = payload.total || 0;
+                },
+
+                endVoting(payload) {
+                    this.votingActive = false;
+                    this.results = payload.results || {};
+                    this.winner = payload.winner;
+                    this.showResults = true;
+                    
+                    if (this.timerInterval) {
+                        clearInterval(this.timerInterval);
+                        this.timerInterval = null;
+                    }
+
+                    // Calculate total votes
+                    this.totalVotes = Object.values(this.results).reduce((a, b) => a + b, 0);
+                },
+
+                resetForNewChapter() {
+                    this.selectedChoice = null;
+                    this.hasVoted = false;
+                    this.winner = null;
+                    this.showResults = false;
+                },
+
+                vote(choiceId) {
+                    if (this.hasVoted && this.selectedChoice === choiceId) {
+                        return; // Already voted for this choice
+                    }
+
+                    this.selectedChoice = choiceId;
+                    this.hasVoted = true;
+
+                    const message = {
+                        type: 'vote',
+                        voter_id: this.voterId,
+                        choice_id: choiceId
+                    };
+
+                    this.ws.send(JSON.stringify(message));
+                },
+
+                getWinnerLabel() {
+                    if (!this.winner) return '';
+                    const choice = this.choices.find(c => c.id === this.winner);
+                    return choice ? choice.Label : '';
+                },
+
+                getWinnerIcon() {
+                    if (!this.winner) return '';
+                    const choice = this.choices.find(c => c.id === this.winner);
+                    return choice ? (choice.Icon || '🎯') : '🎯';
+                }
+            }
+        }
+    </script>
+</body>
+</html>
