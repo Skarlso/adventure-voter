@@ -7,91 +7,83 @@
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @keyframes pulse-slow {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
+        @keyframes fade-in {
+            from { opacity: 0; }
+            to { opacity: 1; }
         }
-        .pulse-slow {
-            animation: pulse-slow 2s ease-in-out infinite;
-        }
-        @keyframes slide-in {
-            from { transform: translateY(20px); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
-        }
-        .slide-in {
-            animation: slide-in 0.3s ease-out;
+        .fade-in {
+            animation: fade-in 0.4s ease-out;
         }
     </style>
 </head>
-<body class="bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 min-h-screen">
+<body class="bg-neutral-50 min-h-screen">
     <div x-data="voterApp()" x-init="init()" class="container mx-auto px-4 py-8 max-w-md">
         <!-- Header -->
         <div class="text-center mb-8">
-            <h1 class="text-4xl font-bold text-white mb-2">⚓ Kubernetes Quest</h1>
-            <p class="text-purple-200">Choose Your Adventure</p>
+            <h1 class="text-3xl font-medium text-neutral-900 mb-1">Kubernetes Quest</h1>
+            <p class="text-neutral-500 text-sm">Choose Your Adventure</p>
         </div>
 
         <!-- Connection Status -->
-        <div class="mb-4 text-center">
-            <div x-show="!connected" class="bg-red-500 text-white px-4 py-2 rounded-lg pulse-slow">
-                🔌 Connecting...
+        <div class="mb-6 text-center">
+            <div x-show="!connected" class="bg-neutral-900 text-white px-4 py-2 rounded-md text-sm">
+                Connecting...
             </div>
-            <div x-show="connected && !votingActive" class="bg-blue-500 text-white px-4 py-2 rounded-lg">
-                ✅ Connected - Waiting for next question...
+            <div x-show="connected && !votingActive" class="bg-emerald-50 text-emerald-700 px-4 py-2 rounded-md text-sm border border-emerald-200">
+                Connected — Waiting for next question
             </div>
         </div>
 
         <!-- Voting Interface -->
-        <div x-show="votingActive" class="slide-in">
+        <div x-show="votingActive" class="fade-in">
             <!-- Question -->
-            <div class="bg-white/10 backdrop-blur-lg rounded-2xl p-6 mb-6 border border-white/20">
-                <h2 class="text-2xl font-bold text-white mb-4 text-center">
+            <div class="bg-white rounded-lg p-6 mb-6 border border-neutral-200 shadow-sm">
+                <h2 class="text-xl font-medium text-neutral-900 mb-4 text-center">
                     What should we do next?
                 </h2>
-                
+
                 <!-- Timer -->
                 <div class="mb-4">
-                    <div class="flex justify-between text-sm text-purple-200 mb-2">
+                    <div class="flex justify-between text-sm text-neutral-600 mb-2">
                         <span>Time remaining</span>
                         <span x-text="timeRemaining + 's'"></span>
                     </div>
-                    <div class="w-full bg-white/20 rounded-full h-3 overflow-hidden">
-                        <div class="bg-gradient-to-r from-green-400 to-blue-500 h-full transition-all duration-1000"
+                    <div class="w-full bg-neutral-200 rounded-full h-1.5 overflow-hidden">
+                        <div class="bg-blue-600 h-full transition-all duration-1000"
                              :style="'width: ' + (timeRemaining / totalTime * 100) + '%'"></div>
                     </div>
                 </div>
             </div>
 
             <!-- Choices -->
-            <div class="space-y-4">
+            <div class="space-y-3">
                 <template x-for="choice in choices" :key="choice.ID">
                     <button @click="vote(choice.ID)"
                             :disabled="hasVoted && selectedChoice !== choice.ID"
                             :class="{
-                                'bg-gradient-to-r from-blue-500 to-purple-600 ring-4 ring-yellow-400': selectedChoice === choice.ID,
-                                'bg-white/10 hover:bg-white/20': selectedChoice !== choice.ID,
-                                'opacity-50 cursor-not-allowed': hasVoted && selectedChoice !== choice.ID
+                                'bg-blue-600 text-white border-blue-600': selectedChoice === choice.ID,
+                                'bg-white hover:bg-neutral-50 text-neutral-900': selectedChoice !== choice.ID,
+                                'opacity-40 cursor-not-allowed': hasVoted && selectedChoice !== choice.ID
                             }"
-                            class="w-full backdrop-blur-lg rounded-xl p-5 border border-white/20 transition-all transform hover:scale-105 active:scale-95">
+                            class="w-full rounded-lg p-4 border border-neutral-200 transition-all">
                         <div class="flex items-center justify-between">
                             <div class="text-left flex-1">
-                                <div class="text-2xl mb-2" x-text="choice.Icon || '🔹'"></div>
-                                <div class="text-lg font-bold text-white" x-text="choice.Label"></div>
-                                <div class="text-sm text-purple-200" x-text="choice.Description"></div>
+                                <div class="text-lg mb-1 font-medium" x-text="choice.Label"></div>
+                                <div class="text-sm opacity-70" x-text="choice.Description"></div>
                             </div>
                             <div class="ml-4">
-                                <div x-show="selectedChoice === choice.ID" class="text-4xl">✓</div>
+                                <div x-show="selectedChoice === choice.ID" class="text-2xl">✓</div>
                             </div>
                         </div>
-                        
+
                         <!-- Vote Count Bar -->
                         <div x-show="showResults" class="mt-3">
-                            <div class="flex justify-between text-sm text-white mb-1">
+                            <div class="flex justify-between text-xs mb-1 opacity-70">
                                 <span x-text="results[choice.ID] || 0">0</span>
                                 <span x-text="((results[choice.ID] || 0) / totalVotes * 100).toFixed(0) + '%'">0%</span>
                             </div>
-                            <div class="w-full bg-white/20 rounded-full h-2 overflow-hidden">
-                                <div class="bg-gradient-to-r from-yellow-400 to-orange-500 h-full transition-all duration-500"
+                            <div class="w-full bg-neutral-200 rounded-full h-1 overflow-hidden">
+                                <div class="bg-blue-500 h-full transition-all duration-500"
                                      :style="'width: ' + ((results[choice.ID] || 0) / totalVotes * 100) + '%'"></div>
                             </div>
                         </div>
@@ -100,30 +92,29 @@
             </div>
 
             <!-- Vote Confirmation -->
-            <div x-show="hasVoted" class="mt-6 text-center slide-in">
-                <div class="bg-green-500 text-white px-6 py-3 rounded-lg inline-block">
-                    ✅ Vote Recorded!
+            <div x-show="hasVoted" class="mt-6 text-center fade-in">
+                <div class="bg-emerald-600 text-white px-6 py-2 rounded-md inline-block text-sm">
+                    Vote Recorded
                 </div>
             </div>
         </div>
 
         <!-- Results View -->
-        <div x-show="!votingActive && winner" class="slide-in">
-            <div class="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20 text-center">
-                <h2 class="text-3xl font-bold text-white mb-4">🎉 The Team Chose...</h2>
-                <div class="text-5xl mb-4" x-text="getWinnerIcon()"></div>
-                <div class="text-2xl font-bold text-yellow-400 mb-6" x-text="getWinnerLabel()"></div>
-                
+        <div x-show="!votingActive && winner" class="fade-in">
+            <div class="bg-white rounded-lg p-8 border border-neutral-200 shadow-sm text-center">
+                <h2 class="text-2xl font-medium text-neutral-900 mb-6">The Team Chose</h2>
+                <div class="text-xl font-medium text-blue-700 mb-6" x-text="getWinnerLabel()"></div>
+
                 <!-- Results Bars -->
                 <div class="space-y-3 mb-6">
                     <template x-for="choice in choices" :key="choice.ID">
                         <div class="text-left">
-                            <div class="flex justify-between text-sm text-white mb-1">
+                            <div class="flex justify-between text-sm text-neutral-700 mb-1">
                                 <span x-text="choice.Label"></span>
                                 <span x-text="((results[choice.ID] || 0) / totalVotes * 100).toFixed(0) + '%'">0%</span>
                             </div>
-                            <div class="w-full bg-white/20 rounded-full h-3 overflow-hidden">
-                                <div :class="choice.ID === winner ? 'bg-gradient-to-r from-yellow-400 to-orange-500' : 'bg-gradient-to-r from-blue-400 to-purple-500'"
+                            <div class="w-full bg-neutral-200 rounded-full h-2 overflow-hidden">
+                                <div :class="choice.ID === winner ? 'bg-blue-600' : 'bg-neutral-400'"
                                      class="h-full transition-all duration-1000"
                                      :style="'width: ' + ((results[choice.ID] || 0) / totalVotes * 100) + '%'"></div>
                             </div>
@@ -131,12 +122,12 @@
                     </template>
                 </div>
 
-                <p class="text-purple-200">Waiting for the next chapter...</p>
+                <p class="text-neutral-500 text-sm">Waiting for the next chapter...</p>
             </div>
         </div>
 
         <!-- User ID Display -->
-        <div class="mt-8 text-center text-purple-300 text-sm">
+        <div class="mt-8 text-center text-neutral-400 text-xs">
             <p>Your ID: <span class="font-mono" x-text="voterId"></span></p>
         </div>
     </div>

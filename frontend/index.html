@@ -3,43 +3,43 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>⚓ Kubernetes Quest</title>
+    <title>Kubernetes Quest</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 min-h-screen flex items-center justify-center">
+<body class="bg-neutral-50 min-h-screen flex items-center justify-center">
     <div class="container mx-auto px-4 py-8 max-w-2xl">
-        <div class="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20 text-center">
-            <h1 class="text-5xl font-bold text-white mb-4">⚓ Kubernetes Quest</h1>
-            <p class="text-xl text-purple-200 mb-8">Interactive Choose Your Own Adventure</p>
-            
-            <div class="space-y-4">
-                <a href="/presenter/" 
-                   class="block w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold text-xl px-8 py-4 rounded-xl hover:scale-105 transition-transform">
-                    🎬 Presenter View
-                    <p class="text-sm font-normal mt-2">For the main screen/projector</p>
+        <div class="bg-white rounded-lg p-10 border border-neutral-200 shadow-sm text-center">
+            <h1 class="text-3xl font-medium text-neutral-900 mb-2">Kubernetes Quest</h1>
+            <p class="text-neutral-600 mb-8">Interactive Choose Your Own Adventure</p>
+
+            <div class="space-y-3">
+                <a href="/presenter/"
+                   class="block w-full bg-blue-600 hover:bg-blue-700 text-white font-medium text-lg px-8 py-4 rounded-lg transition-colors">
+                    Presenter View
+                    <p class="text-sm font-normal opacity-80 mt-1">For the main screen/projector</p>
                 </a>
-                
-                <a href="/voter/" 
-                   class="block w-full bg-gradient-to-r from-green-500 to-blue-500 text-white font-bold text-xl px-8 py-4 rounded-xl hover:scale-105 transition-transform">
-                    🎮 Voter View
-                    <p class="text-sm font-normal mt-2">For audience members (mobile-friendly)</p>
+
+                <a href="/voter/"
+                   class="block w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-lg px-8 py-4 rounded-lg transition-colors">
+                    Voter View
+                    <p class="text-sm font-normal opacity-80 mt-1">For audience members (mobile-friendly)</p>
                 </a>
             </div>
 
-            <div class="mt-8 p-4 bg-black/30 rounded-lg text-left text-sm text-purple-200">
-                <p class="font-bold mb-2">Quick Start:</p>
-                <ol class="list-decimal list-inside space-y-1">
-                    <li>Open <strong>Presenter View</strong> on your main screen</li>
-                    <li>Share the <strong>Voter View</strong> URL with your audience</li>
+            <div class="mt-8 p-6 bg-neutral-50 rounded-lg text-left text-sm text-neutral-700 border border-neutral-200">
+                <p class="font-medium mb-3 text-neutral-900">Quick Start</p>
+                <ol class="list-decimal list-inside space-y-2">
+                    <li>Open Presenter View on your main screen</li>
+                    <li>Share the Voter View URL with your audience</li>
                     <li>Navigate through the story</li>
-                    <li>At decision points, start voting!</li>
+                    <li>At decision points, start voting</li>
                     <li>Watch the adventure unfold based on votes</li>
                 </ol>
             </div>
 
             <div class="mt-6">
-                <p class="text-purple-300 text-sm">
-                    Built with ❤️ for interactive presentations
+                <p class="text-neutral-400 text-xs">
+                    Built for interactive presentations
                 </p>
             </div>
         </div>

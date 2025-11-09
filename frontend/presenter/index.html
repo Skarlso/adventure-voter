@@ -9,98 +9,87 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         @keyframes fade-in {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
+            from { opacity: 0; }
+            to { opacity: 1; }
         }
         .fade-in {
-            animation: fade-in 0.5s ease-out;
+            animation: fade-in 0.4s ease-out;
         }
         .chapter-content {
-            font-size: 1.25rem;
-            line-height: 1.8;
+            font-size: 1.125rem;
+            line-height: 1.75;
+            color: #171717;
         }
         .chapter-content h1 {
-            font-size: 3rem;
-            font-weight: bold;
+            font-size: 2.5rem;
+            font-weight: 600;
             margin-bottom: 1.5rem;
-            color: #fbbf24;
+            color: #171717;
         }
         .chapter-content h2 {
-            font-size: 2rem;
-            font-weight: bold;
+            font-size: 1.875rem;
+            font-weight: 500;
             margin-top: 2rem;
             margin-bottom: 1rem;
-            color: #60a5fa;
+            color: #262626;
         }
         .chapter-content p {
             margin-bottom: 1rem;
         }
         .chapter-content code {
-            background: rgba(255, 255, 255, 0.1);
+            background: #f5f5f5;
             padding: 0.2rem 0.4rem;
             border-radius: 0.25rem;
             font-family: 'Courier New', monospace;
+            color: #171717;
         }
         .chapter-content pre {
-            background: rgba(0, 0, 0, 0.3);
+            background: #f5f5f5;
             padding: 1rem;
             border-radius: 0.5rem;
             overflow-x: auto;
             margin: 1rem 0;
+            border: 1px solid #e5e5e5;
         }
         .chapter-content pre code {
             background: transparent;
             padding: 0;
         }
-        .danger-box {
-            background: rgba(220, 38, 38, 0.2);
-            border-left: 4px solid #ef4444;
-            padding: 1rem;
-            margin: 1rem 0;
-            border-radius: 0.5rem;
-        }
-        .success-box {
-            background: rgba(34, 197, 94, 0.2);
-            border-left: 4px solid #22c55e;
-            padding: 1rem;
-            margin: 1rem 0;
-            border-radius: 0.5rem;
-        }
     </style>
 </head>
-<body class="bg-gradient-to-br from-gray-900 via-purple-900 to-violet-900 min-h-screen text-white">
+<body class="bg-white min-h-screen text-neutral-900">
     <div x-data="presenterApp()" x-init="init()" class="h-screen flex flex-col">
         <!-- Control Bar -->
-        <div class="bg-black/50 backdrop-blur-lg border-b border-white/10 p-4">
+        <div class="bg-neutral-900 border-b border-neutral-800 px-6 py-3">
             <div class="container mx-auto flex justify-between items-center">
                 <div class="flex items-center space-x-4">
-                    <h1 class="text-2xl font-bold">⚓ Kubernetes Quest</h1>
+                    <h1 class="text-lg font-medium text-white">Kubernetes Quest</h1>
                     <div class="flex items-center space-x-2">
-                        <div :class="connected ? 'bg-green-500' : 'bg-red-500'" class="w-3 h-3 rounded-full"></div>
-                        <span class="text-sm" x-text="connected ? 'Connected' : 'Disconnected'"></span>
+                        <div :class="connected ? 'bg-green-500' : 'bg-red-500'" class="w-2 h-2 rounded-full"></div>
+                        <span class="text-xs text-neutral-400" x-text="connected ? 'Connected' : 'Disconnected'"></span>
                     </div>
                 </div>
-                
-                <div class="flex items-center space-x-4">
+
+                <div class="flex items-center space-x-3">
                     <!-- Voting Status -->
-                    <div x-show="votingActive" class="bg-yellow-500 text-black px-4 py-2 rounded-lg font-bold">
-                        🗳️ Voting Active: <span x-text="timeRemaining + 's'"></span>
+                    <div x-show="votingActive" class="bg-blue-600 text-white px-3 py-1.5 rounded-md text-sm font-medium">
+                        Voting: <span x-text="timeRemaining + 's'"></span>
                     </div>
-                    
+
                     <!-- Total Votes -->
-                    <div class="bg-blue-500 px-4 py-2 rounded-lg">
-                        <span class="font-bold" x-text="totalVotes"></span> votes
+                    <div class="bg-neutral-800 text-white px-3 py-1.5 rounded-md text-sm">
+                        <span class="font-medium" x-text="totalVotes"></span> votes
                     </div>
 
                     <!-- Control Buttons -->
-                    <button @click="restartStory()" 
-                            class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-bold transition-colors">
-                        🔄 Restart Story
+                    <button @click="restartStory()"
+                            class="bg-neutral-800 hover:bg-neutral-700 text-white px-3 py-1.5 rounded-md text-sm transition-colors">
+                        Restart
                     </button>
-                    <button @click="goBack()" 
+                    <button @click="goBack()"
                             x-show="canGoBack"
-                            class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-bold transition-colors">
-                        ⬅️ Go Back
+                            class="bg-neutral-800 hover:bg-neutral-700 text-white px-3 py-1.5 rounded-md text-sm transition-colors">
+                        ← Back
                     </button>
                 </div>
             </div>
@@ -115,48 +104,47 @@
                 </div>
 
                 <!-- Decision Point -->
-                <div x-show="isDecisionPoint && !votingActive && !winner" class="text-center space-x-4">
-                    <button @click="startVoting()" 
-                            class="bg-gradient-to-r from-yellow-500 to-orange-500 text-black font-bold text-xl px-8 py-4 rounded-xl hover:scale-105 transition-transform">
-                        🗳️ Start Voting
+                <div x-show="isDecisionPoint && !votingActive && !winner" class="text-center space-x-3">
+                    <button @click="startVoting()"
+                            class="bg-blue-600 hover:bg-blue-700 text-white font-medium text-lg px-8 py-3 rounded-lg transition-colors">
+                        Start Voting
                     </button>
-                    <button @click="restartVoting()" 
+                    <button @click="restartVoting()"
                             x-show="hasVoted"
-                            class="bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold text-xl px-8 py-4 rounded-xl hover:scale-105 transition-transform">
-                        🔄 Restart Voting
+                            class="bg-neutral-700 hover:bg-neutral-600 text-white font-medium text-lg px-8 py-3 rounded-lg transition-colors">
+                        Restart Voting
                     </button>
                 </div>
 
                 <!-- Voting in Progress -->
                 <div x-show="votingActive" class="fade-in">
-                    <div class="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20">
-                        <h2 class="text-3xl font-bold text-center mb-6">🗳️ Voting in Progress</h2>
-                        
+                    <div class="bg-neutral-50 rounded-lg p-8 border border-neutral-200">
+                        <h2 class="text-2xl font-medium text-center mb-6">Voting in Progress</h2>
+
                         <!-- Progress Bar -->
                         <div class="mb-8">
-                            <div class="w-full bg-white/20 rounded-full h-4 overflow-hidden">
-                                <div class="bg-gradient-to-r from-green-400 to-blue-500 h-full transition-all duration-1000"
+                            <div class="w-full bg-neutral-200 rounded-full h-2 overflow-hidden">
+                                <div class="bg-blue-600 h-full transition-all duration-1000"
                                      :style="'width: ' + (timeRemaining / totalTime * 100) + '%'"></div>
                             </div>
-                            <p class="text-center text-2xl font-bold mt-4" x-text="timeRemaining + ' seconds remaining'"></p>
+                            <p class="text-center text-lg text-neutral-600 mt-4" x-text="timeRemaining + ' seconds remaining'"></p>
                         </div>
 
                         <!-- Real-time Results -->
-                        <div class="space-y-4">
+                        <div class="space-y-3">
                             <template x-for="choice in choices" :key="choice.ID">
-                                <div class="bg-black/30 rounded-xl p-6">
+                                <div class="bg-white rounded-lg p-5 border border-neutral-200">
                                     <div class="flex justify-between items-center mb-3">
                                         <div class="flex items-center space-x-3">
-                                            <span class="text-3xl" x-text="choice.Icon || '🔹'"></span>
-                                            <span class="text-xl font-bold" x-text="choice.Label"></span>
+                                            <span class="text-lg font-medium" x-text="choice.Label"></span>
                                         </div>
                                         <div class="text-right">
-                                            <div class="text-3xl font-bold text-yellow-400" x-text="results[choice.ID] || 0"></div>
-                                            <div class="text-sm text-purple-300" x-text="getPercentage(choice.ID) + '%'"></div>
+                                            <div class="text-2xl font-semibold text-neutral-900" x-text="results[choice.ID] || 0"></div>
+                                            <div class="text-xs text-neutral-500" x-text="getPercentage(choice.ID) + '%'"></div>
                                         </div>
                                     </div>
-                                    <div class="w-full bg-white/20 rounded-full h-3 overflow-hidden">
-                                        <div class="bg-gradient-to-r from-blue-400 to-purple-500 h-full transition-all duration-500"
+                                    <div class="w-full bg-neutral-200 rounded-full h-2 overflow-hidden">
+                                        <div class="bg-blue-500 h-full transition-all duration-500"
                                              :style="'width: ' + getPercentage(choice.ID) + '%'"></div>
                                     </div>
                                 </div>
@@ -167,32 +155,30 @@
 
                 <!-- Results -->
                 <div x-show="!votingActive && winner" class="fade-in">
-                    <div class="bg-gradient-to-br from-yellow-500/20 to-orange-500/20 backdrop-blur-lg rounded-2xl p-8 border-2 border-yellow-500">
-                        <h2 class="text-4xl font-bold text-center mb-8">🎉 The Team Has Decided!</h2>
-                        
+                    <div class="bg-neutral-50 rounded-lg p-8 border border-neutral-200">
+                        <h2 class="text-2xl font-medium text-center mb-8">The Team Has Decided</h2>
+
                         <div class="text-center mb-8">
-                            <div class="text-6xl mb-4" x-text="getWinnerIcon()"></div>
-                            <div class="text-3xl font-bold text-yellow-400" x-text="getWinnerLabel()"></div>
+                            <div class="text-2xl font-medium text-blue-700" x-text="getWinnerLabel()"></div>
                         </div>
 
                         <!-- Final Results -->
-                        <div class="space-y-4 mb-8">
+                        <div class="space-y-3 mb-8">
                             <template x-for="choice in choices" :key="choice.ID">
-                                <div :class="choice.ID === winner ? 'bg-yellow-500/30 ring-2 ring-yellow-400' : 'bg-black/30'" 
-                                     class="rounded-xl p-6">
+                                <div :class="choice.ID === winner ? 'bg-blue-600 text-white' : 'bg-white'"
+                                     class="rounded-lg p-5 border border-neutral-200">
                                     <div class="flex justify-between items-center mb-3">
                                         <div class="flex items-center space-x-3">
-                                            <span class="text-3xl" x-text="choice.Icon || '🔹'"></span>
-                                            <span class="text-xl font-bold" x-text="choice.Label"></span>
+                                            <span class="text-lg font-medium" x-text="choice.Label"></span>
                                         </div>
                                         <div class="text-right">
-                                            <div class="text-3xl font-bold" :class="choice.ID === winner ? 'text-yellow-400' : 'text-white'" 
+                                            <div class="text-2xl font-semibold"
                                                  x-text="results[choice.ID] || 0"></div>
-                                            <div class="text-sm text-purple-300" x-text="getPercentage(choice.ID) + '%'"></div>
+                                            <div class="text-xs opacity-70" x-text="getPercentage(choice.ID) + '%'"></div>
                                         </div>
                                     </div>
-                                    <div class="w-full bg-white/20 rounded-full h-3 overflow-hidden">
-                                        <div :class="choice.ID === winner ? 'bg-gradient-to-r from-yellow-400 to-orange-500' : 'bg-gradient-to-r from-blue-400 to-purple-500'"
+                                    <div :class="choice.ID === winner ? 'bg-blue-500' : 'bg-neutral-200'" class="w-full rounded-full h-2 overflow-hidden">
+                                        <div :class="choice.ID === winner ? 'bg-white' : 'bg-neutral-900'"
                                              class="h-full transition-all duration-1000"
                                              :style="'width: ' + getPercentage(choice.ID) + '%'"></div>
                                     </div>
@@ -201,9 +187,9 @@
                         </div>
 
                         <div class="text-center">
-                            <button @click="advanceStory()" 
-                                    class="bg-gradient-to-r from-green-500 to-blue-500 text-white font-bold text-xl px-8 py-4 rounded-xl hover:scale-105 transition-transform">
-                                ➡️ Continue the Adventure
+                            <button @click="advanceStory()"
+                                    class="bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-lg px-8 py-3 rounded-lg transition-colors">
+                                Continue
                             </button>
                         </div>
                     </div>
@@ -211,26 +197,26 @@
 
                 <!-- Simple Continue Button (for non-decision chapters) -->
                 <div x-show="!isDecisionPoint && currentChapter && !isTerminal" class="text-center mt-8">
-                    <button @click="advanceStory()" 
-                            class="bg-gradient-to-r from-blue-500 to-purple-500 text-white font-bold text-xl px-8 py-4 rounded-xl hover:scale-105 transition-transform">
-                        ➡️ Continue
+                    <button @click="advanceStory()"
+                            class="bg-blue-600 hover:bg-blue-700 text-white font-medium text-lg px-8 py-3 rounded-lg transition-colors">
+                        Continue
                     </button>
                 </div>
 
                 <!-- Terminal/End State -->
                 <div x-show="isTerminal" class="text-center mt-8 space-y-4">
-                    <div class="bg-gradient-to-br from-purple-500/20 to-pink-500/20 backdrop-blur-lg rounded-2xl p-8 border-2 border-purple-500">
-                        <h2 class="text-4xl font-bold mb-4">🎭 The End</h2>
-                        <p class="text-xl mb-6">This path has reached its conclusion.</p>
-                        <div class="space-x-4">
-                            <button @click="goBack()" 
+                    <div class="bg-neutral-50 rounded-lg p-8 border border-neutral-200">
+                        <h2 class="text-2xl font-medium mb-4">The End</h2>
+                        <p class="text-neutral-600 mb-6">This path has reached its conclusion.</p>
+                        <div class="space-x-3">
+                            <button @click="goBack()"
                                     x-show="canGoBack"
-                                    class="bg-gradient-to-r from-gray-600 to-gray-700 text-white font-bold text-xl px-8 py-4 rounded-xl hover:scale-105 transition-transform">
-                                ⬅️ Try Different Path
+                                    class="bg-neutral-700 hover:bg-neutral-600 text-white font-medium text-lg px-8 py-3 rounded-lg transition-colors">
+                                ← Try Different Path
                             </button>
-                            <button @click="restartStory()" 
-                                    class="bg-gradient-to-r from-green-500 to-blue-500 text-white font-bold text-xl px-8 py-4 rounded-xl hover:scale-105 transition-transform">
-                                🔄 Restart Adventure
+                            <button @click="restartStory()"
+                                    class="bg-neutral-900 hover:bg-neutral-800 text-white font-medium text-lg px-8 py-3 rounded-lg transition-colors">
+                                Restart Adventure
                             </button>
                         </div>
                     </div>
