@@ -1,0 +1,27 @@
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+
+# Logs
+*.log
+
+# Docker
+.dockerignore
+
+# Temporary files
+tmp/
+temp/
+bin/

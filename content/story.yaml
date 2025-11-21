@@ -1,0 +1,5 @@
+# Adventure Voter Story Index
+# This file defines the starting point for the adventure.
+# The story graph is automatically built by scanning the markdown files in the chapters directory.
+
+start: intro
