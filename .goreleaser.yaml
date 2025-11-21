@@ -5,7 +5,6 @@ release:
 
 builds:
   - id: default
-    main: ./backend/main.go
     binary: adventure
     flags:
       - -tags
