@@ -7,11 +7,13 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source code
+# Copy source code and frontend for embedding
 COPY backend/ ./backend/
+COPY frontend/ ./frontend/
+COPY main.go .
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/server ./backend/main.go
+# Build the application with embedded frontend
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/adventure .
 
 # Runtime stage
 FROM alpine:latest
@@ -20,15 +22,14 @@ RUN apk --no-cache add ca-certificates
 
 WORKDIR /app
 
-# Copy binary from builder
-COPY --from=builder /app/server .
+# Copy binary from builder (frontend is embedded)
+COPY --from=builder /app/adventure .
 
-# Copy frontend and content
-COPY frontend/ ./frontend/
+# Copy content only (frontend is embedded in binary)
 COPY content/ ./content/
 
 # Expose port
 EXPOSE 8080
 
-# Run the server
-CMD ["./server", "-addr=:8080", "-content=./content/chapters", "-story=./content/story.yaml", "-static=./frontend"]
+# Run the server (uses embedded frontend by default)
+CMD ["./adventure", "-addr=:8080", "-content=./content/chapters", "-story=./content/story.yaml"]

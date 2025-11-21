@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -28,12 +29,12 @@ type Server struct {
 	storyEngine     *parser.StoryEngine
 	currentNode     string
 	history         []string // breadcrumb of visited chapter IDs
-	staticDir       string
+	staticFS        fs.FS
 	presenterSecret string
 }
 
-// NewServer creates a new server instance.
-func NewServer(storyPath, contentDir, staticDir, presenterSecret string) (*Server, error) {
+// NewServer creates a new server instance with embedded filesystem.
+func NewServer(storyPath, contentDir string, staticFS fs.FS, presenterSecret string) (*Server, error) {
 	engine, err := parser.NewStoryEngine(storyPath, contentDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create story engine: %w", err)
@@ -53,20 +54,18 @@ func NewServer(storyPath, contentDir, staticDir, presenterSecret string) (*Serve
 		storyEngine:     engine,
 		currentNode:     engine.Story.Flow.Start,
 		history:         []string{},
-		staticDir:       staticDir,
+		staticFS:        staticFS,
 		presenterSecret: presenterSecret,
 	}
 
 	s.setupRoutes()
 
-	// Start vote manager
 	go s.voteManager.Run()
 
 	return s, nil
 }
 
 func (s *Server) setupRoutes() {
-	// API routes
 	api := s.router.PathPrefix("/api").Subrouter()
 
 	// no auth
@@ -82,8 +81,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/go-back", s.requirePresenterAuth(s.handleGoBack)).Methods("POST")
 
 	s.router.HandleFunc("/ws", s.handleWebSocket)
-	s.router.PathPrefix("/presenter").Handler(s.requirePresenterAuthMiddleware(http.FileServer(http.Dir(s.staticDir))))
-	s.router.PathPrefix("/").Handler(http.FileServer(http.Dir(s.staticDir)))
+
+	fileServer := http.FileServer(http.FS(s.staticFS))
+	s.router.PathPrefix("/presenter").Handler(s.requirePresenterAuthMiddleware(fileServer))
+	s.router.PathPrefix("/").Handler(fileServer)
 }
 
 // requirePresenterAuth is a simple middleware for presenter authentication.
@@ -469,7 +470,6 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 func (s *Server) Start(addr string) error {
 	log.Printf("Starting server on %s", addr)
 	log.Printf("Content directory: %s", filepath.Dir(s.storyEngine.ContentDir))
-	log.Printf("Static directory: %s", s.staticDir)
 
 	server := http.Server{
 		Addr:        addr,

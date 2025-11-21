@@ -56,14 +56,67 @@ Then open http://localhost:8080/presenter for your presentation screen and share
 Or build from source:
 
 ```bash
-cd backend
-go build -o server ./main.go
-./server
+make build
+# Or: go build -o adventure .
+./adventure
 ```
+
+The frontend is embedded in the binary at compile time using Go's `embed` package, so you only need the binary and your content files for distribution.
 
 Once done, run `docker-compose down` to shut it down.
 
 Download from latest release:
+
+Go to the GitHub release page, for example: https://github.com/user/adventure-voter/releases/tag/v0.0.1
+
+Find your binary, download and extract it. From there, simply create a structure like this:
+
+```
+➜ tree
+.
+├── adventure
+└── content
+    ├── chapters
+    │   ├── 01-intro.md
+    │   ├── 02-certificate-choice.md
+    │   ├── 03a-cfssl-success.md
+    │   ├── 03b-openssl-fail.md
+    │   ├── 03c-self-signed-disaster.md
+    │   ├── 04-etcd-choice.md
+    │   ├── 05a-etcd-success.md
+    │   ├── 05b-etcd-warning.md
+    │   ├── 05c-etcd-disaster.md
+    │   ├── 06-apiserver-choice.md
+    │   ├── 07a-apiserver-success.md
+    │   ├── 07b-apiserver-insecure.md
+    │   ├── 07c-apiserver-broken.md
+    │   ├── 08-network-choice.md
+    │   ├── 09a-network-success.md
+    │   ├── 09b-network-mess.md
+    │   ├── 09c-network-broken.md
+    │   └── 10-final-success.md
+    └── story.yaml
+
+3 directories, 20 files
+```
+
+And run the binary like this:
+```
+➜ ./adventure
+2025/11/21 08:16:47 Adventure server starting...
+2025/11/21 08:16:47 Content: /Users/user/goprojects/presentation/content/chapters
+2025/11/21 08:16:47 Story: /Users/user/goprojects/presentation/content/story.yaml
+2025/11/21 08:16:47 Static: /Users/user/goprojects/presentation/frontend
+2025/11/21 08:16:47 Server: http://localhost:8080
+2025/11/21 08:16:47 Voter: http://localhost:8080/voter
+2025/11/21 08:16:47 Presenter: http://localhost:8080/presenter
+2025/11/21 08:16:47 Presenter authentication: DISABLED
+2025/11/21 08:16:47 Starting server on :8080
+2025/11/21 08:16:47 Content directory: /Users/user/goprojects/presentation/content
+2025/11/21 08:16:47 Static directory: /Users/user/goprojects/presentation/frontend
+```
+
+Navigate to http://localhost:8080 and you should be greeted with the choice of being a presenter or a voter.
 
 ## Writing Content
 
@@ -161,15 +214,20 @@ Then configure your reverse proxy to handle TLS and forward requests to port 808
 The server accepts several flags:
 
 ```bash
-./server \
+./adventure \
   -addr=:8080 \
   -content=content/chapters \
   -story=content/story.yaml \
-  -static=frontend \
   -presenter-secret=your-password
 ```
 
-The presenter secret is optional. If set, presenter control endpoints require a Bearer token. This prevents audience
+Configuration flags:
+- `-addr`: Server address (default: `:8080`)
+- `-content`: Path to chapter markdown files (default: `content/chapters`)
+- `-story`: Path to story.yaml (default: `content/story.yaml`)
+- `-presenter-secret`: Authentication password (optional; disables auth if empty)
+
+The presenter secret is optional. If set, presenter control endpoints require authentication. This prevents audience
 members from advancing slides. Public endpoints (viewing chapters, voting) remain open.
 
 ## Security

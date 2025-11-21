@@ -1,8 +1,8 @@
 .PHONY: build run dev clean docker test help
 
 # Variables
-BINARY_NAME=server
-DOCKER_IMAGE=kube-quest
+BINARY_NAME=adventure
+DOCKER_IMAGE=adventure-voter
 GO_FILES=$(shell find . -name '*.go' -type f)
 
 # Set the build dir, where built cross-compiled binaries will be output
@@ -41,7 +41,7 @@ help:
 # Build the server
 build:
 	@echo "Building server..."
-	@go build -o $(LOCALBIN)/$(BINARY_NAME) ./backend/main.go
+	@go build -o $(LOCALBIN)/$(BINARY_NAME) .
 	@echo "Build complete: ./$(LOCALBIN)/$(BINARY_NAME)"
 
 # Build and run
@@ -77,6 +77,7 @@ clean:
 	@echo "Cleaning..."
 	@rm -f $(BINARY_NAME)
 	@rm -rf tmp/
+	@rm -rf $(LOCALBIN)
 	@echo "Clean complete"
 
 # Build Docker image
@@ -120,5 +121,5 @@ lint: golangci-lint ## Run golangci-lint.
 # Build for production (with optimizations)
 build-prod:
 	@echo "Building for production..."
-	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o $(BINARY_NAME) backend/main.go
+	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o $(BINARY_NAME) .
 	@echo "Production build complete"

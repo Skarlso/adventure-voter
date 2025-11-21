@@ -1,18 +1,24 @@
 package main
 
 import (
+	"embed"
 	"flag"
+	"io/fs"
 	"log"
 	"path/filepath"
 
 	"github.com/skarlso/kube_adventures/voting/backend/server"
 )
 
+// Frontend embeds the frontend directory at compile time.
+//
+//go:embed frontend
+var frontendFS embed.FS
+
 func main() {
 	addr := flag.String("addr", ":8080", "HTTP server address")
 	contentDir := flag.String("content", "content/chapters", "Path to content directory")
 	storyFile := flag.String("story", "content/story.yaml", "Path to story.yaml file")
-	staticDir := flag.String("static", "frontend", "Path to static files directory")
 	presenterSecret := flag.String("presenter-secret", "", "Presenter authentication secret (optional, disables auth if empty)")
 
 	flag.Parse()
@@ -27,12 +33,13 @@ func main() {
 		log.Fatalf("Failed to resolve story file: %v", err)
 	}
 
-	absStaticDir, err := filepath.Abs(*staticDir)
+	// frontend filesystem with "frontend" prefix stripped
+	embeddedFS, err := fs.Sub(frontendFS, "frontend")
 	if err != nil {
-		log.Fatalf("Failed to resolve static directory: %v", err)
+		log.Fatalf("Failed to get embedded frontend: %v", err)
 	}
 
-	srv, err := server.NewServer(absStoryFile, absContentDir, absStaticDir, *presenterSecret)
+	srv, err := server.NewServer(absStoryFile, absContentDir, embeddedFS, *presenterSecret)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
 	}
@@ -40,7 +47,7 @@ func main() {
 	log.Printf("Adventure server starting...")
 	log.Printf("Content: %s", absContentDir)
 	log.Printf("Story: %s", absStoryFile)
-	log.Printf("Static: %s", absStaticDir)
+	log.Printf("Static: embedded")
 	log.Printf("Server: http://localhost%s", *addr)
 	log.Printf("Voter: http://localhost%s/voter", *addr)
 	log.Printf("Presenter: http://localhost%s/presenter", *addr)

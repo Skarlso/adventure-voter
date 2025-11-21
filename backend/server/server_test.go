@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -79,7 +80,12 @@ type: game-over
 		}
 	}
 
-	server, err := NewServer(indexFile, contentDir, staticDir, "")
+	// Create a mock embedded filesystem for testing
+	mockFS := fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte("<html><body>Test</body></html>")},
+	}
+
+	server, err := NewServer(indexFile, contentDir, mockFS, "")
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -112,6 +118,10 @@ func TestNewServer(t *testing.T) {
 }
 
 func TestNewServer_InvalidPaths(t *testing.T) {
+	mockFS := fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte("<html><body>Test</body></html>")},
+	}
+
 	tests := []struct {
 		name       string
 		storyPath  string
@@ -123,7 +133,7 @@ func TestNewServer_InvalidPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewServer(tt.storyPath, tt.contentDir, "/tmp", "")
+			_, err := NewServer(tt.storyPath, tt.contentDir, mockFS, "")
 			if err == nil {
 				t.Error("expected error for invalid paths")
 			}
