@@ -1,7 +1,7 @@
 <p align="center" width="60%">
     <img src="imgs/adventuring_gopher.png">
 </p>
-Hand-drawn with [Procreate](https://procreate.com/).
+<p align="center">Hand-drawn with <a href="https://procreate.com/">Procreate.</a></p>
 
 # Adventure Voter
 
