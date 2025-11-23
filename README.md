@@ -19,11 +19,6 @@ appear instantly.
 ![screen2](./imgs/screen2.png)
 ![screen3](./imgs/screen3.png)
 ![screen4](./imgs/screen4.png)
-![screen5](./imgs/screen5.png)
-![screen6](./imgs/screen6.png)
-![screen7](./imgs/screen7.png)
-![dark-mode-1](./imgs/dark-mode-1.png)
-![dark-mode-2](./imgs/dark-mode-2.png)
 
 ## Why?
 
