@@ -116,7 +116,7 @@ $(GOLANGCI_LINT): $(LOCALBIN)
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s $(GOLANGCI_LINT_VERSION)
 
 lint: golangci-lint ## Run golangci-lint.
-	$(GOLANGCI_LINT) run ./...
+	$(GOLANGCI_LINT) run --timeout 10m
 
 # Build for production (with optimizations)
 build-prod:
