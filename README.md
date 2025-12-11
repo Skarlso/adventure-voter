@@ -40,6 +40,13 @@ I used the bare minimum I could find, which is alpine.js.
 
 ## Quick Start
 
+Using Homebrew:
+
+```bash
+brew tap skarlso/tap
+brew install adventure-voter
+```
+
 Using Docker:
 
 ```bash
