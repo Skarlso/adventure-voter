@@ -3,12 +3,16 @@ package main
 import (
 	"embed"
 	"flag"
+	"fmt"
 	"io/fs"
 	"log"
 	"path/filepath"
 
 	"github.com/skarlso/kube_adventures/voting/backend/server"
 )
+
+// version is set at build time via -ldflags.
+var version string
 
 // Frontend embeds the frontend directory at compile time.
 //
@@ -20,8 +24,19 @@ func main() {
 	contentDir := flag.String("content", "content/chapters", "Path to content directory")
 	storyFile := flag.String("story", "content/story.yaml", "Path to story.yaml file")
 	presenterSecret := flag.String("presenter-secret", "", "Presenter authentication secret (optional, disables auth if empty)")
+	versionFlag := flag.Bool("version", false, "Print version and exit")
 
 	flag.Parse()
+
+	if *versionFlag {
+		if version == "" {
+			version = "0.0.0-dev"
+		}
+
+		fmt.Println(version) //nolint:forbidigo // version printing
+
+		return
+	}
 
 	absContentDir, err := filepath.Abs(*contentDir)
 	if err != nil {
