@@ -109,7 +109,7 @@ fmt:
 
 # Lint code (requires golangci-lint)
 GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint
-GOLANGCI_LINT_VERSION ?= v2.6.0
+GOLANGCI_LINT_VERSION ?= v2.11.3
 
 golangci-lint: $(GOLANGCI_LINT)
 $(GOLANGCI_LINT): $(LOCALBIN)
