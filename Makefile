@@ -44,6 +44,13 @@ build:
 	@go build -o $(LOCALBIN)/$(BINARY_NAME) .
 	@echo "Build complete: ./$(LOCALBIN)/$(BINARY_NAME)"
 
+# Build and run with -author
+run-author: build
+	@echo "Starting server..."
+	@echo "Presenter: http://localhost:8080/presenter/"
+	@echo "Voter: http://localhost:8080/voter/"
+	@$(LOCALBIN)/$(BINARY_NAME) -author
+
 # Build and run
 run: build
 	@echo "Starting server..."

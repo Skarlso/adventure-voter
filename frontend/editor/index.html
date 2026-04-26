@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Adventure Voter - Editor</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/drawflow@0.0.59/dist/drawflow.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/drawflow@0.0.59/dist/drawflow.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="/assets/pixel.css">
+    <style>
+        html, body { height: 100%; margin: 0; }
+        #drawflow {
+            position: relative;
+            width: 100%;
+            height: calc(100vh - 56px);
+            background: #1a1a1a;
+            background-image:
+                linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+            background-size: 20px 20px;
+            overflow: hidden;
+        }
+        .drawflow .drawflow-node {
+            background: #fafafa;
+            border: 2px solid #000;
+            border-radius: 0;
+            padding: 0;
+            min-width: 220px;
+            color: #171717;
+        }
+        .drawflow .drawflow-node.selected {
+            border-color: #2563eb;
+            outline: 2px solid #2563eb;
+        }
+        .drawflow .drawflow-node .input,
+        .drawflow .drawflow-node .output {
+            background: #fff;
+            border: 2px solid #000;
+            width: 14px;
+            height: 14px;
+            border-radius: 0;
+        }
+        .drawflow .connection .main-path {
+            stroke: #94a3b8;
+            stroke-width: 3px;
+        }
+        .drawflow .connection .main-path:hover { stroke: #2563eb; }
+        .node-card { font-family: system-ui, -apple-system, sans-serif; }
+        .node-header {
+            font-family: 'Press Start 2P', monospace;
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            padding: 6px 10px;
+            color: #fff;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .node-header.story    { background: #1d4ed8; }
+        .node-header.decision { background: #b45309; }
+        .node-header.gameover { background: #b91c1c; }
+        .node-header.terminal { background: #4b5563; }
+        .node-id {
+            font-family: 'Courier New', monospace;
+            font-size: 0.75rem;
+            padding: 8px 10px;
+            border-bottom: 1px solid #e5e5e5;
+            font-weight: 600;
+        }
+        .node-question {
+            padding: 8px 10px;
+            font-size: 0.8rem;
+            color: #525252;
+            border-bottom: 1px solid #e5e5e5;
+        }
+        .node-choice {
+            padding: 6px 10px;
+            font-size: 0.75rem;
+            border-bottom: 1px solid #f5f5f5;
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .node-choice:last-child { border-bottom: none; }
+        .node-choice .label { font-weight: 500; }
+        .node-choice .next {
+            color: #9ca3af;
+            font-family: 'Courier New', monospace;
+            font-size: 0.7rem;
+        }
+        .legend-dot { width: 12px; height: 12px; display: inline-block; border: 2px solid #000; }
+        .drawflow .drawflow-node.dirty { box-shadow: 0 0 0 3px #f59e0b; }
+        .panel {
+            position: fixed;
+            right: 0;
+            top: 56px;
+            bottom: 0;
+            width: 520px;
+            background: #fafafa;
+            color: #171717;
+            border-left: 3px solid #000;
+            display: flex;
+            flex-direction: column;
+            transform: translateX(100%);
+            transition: transform 0.2s ease-out;
+            z-index: 50;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+        .panel.open { transform: translateX(0); }
+        .panel-header {
+            padding: 12px 16px;
+            border-bottom: 2px solid #000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #1d4ed8;
+            color: white;
+        }
+        .panel-body { flex: 1; overflow-y: auto; padding: 16px; }
+        .panel-body label { display: block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; color: #525252; margin-bottom: 4px; margin-top: 12px; }
+        .panel-body label:first-child { margin-top: 0; }
+        .panel-body input[type=text],
+        .panel-body input[type=number],
+        .panel-body select,
+        .panel-body textarea {
+            width: 100%;
+            padding: 6px 8px;
+            border: 2px solid #000;
+            background: white;
+            font-family: inherit;
+            font-size: 0.875rem;
+            border-radius: 0;
+        }
+        .panel-body input:disabled { background: #f3f4f6; color: #6b7280; }
+        .panel-body textarea {
+            font-family: 'Courier New', monospace;
+            min-height: 180px;
+            resize: vertical;
+        }
+        .panel-body .row { display: flex; gap: 8px; }
+        .panel-body .row > * { flex: 1; }
+        .panel-body .checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+        .panel-body .checkbox-row label { margin: 0; text-transform: none; font-size: 0.875rem; font-weight: 400; color: #171717; letter-spacing: 0; }
+        .choice-row {
+            border: 2px solid #d4d4d4;
+            padding: 10px;
+            margin-bottom: 10px;
+            background: white;
+        }
+        .choice-row .row + .row { margin-top: 6px; }
+        .choice-row .actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+        .preview-pane {
+            border: 2px solid #d4d4d4;
+            padding: 12px;
+            background: white;
+            font-size: 0.875rem;
+            line-height: 1.5;
+            max-height: 240px;
+            overflow-y: auto;
+        }
+        .preview-pane h1, .preview-pane h2 { font-weight: 600; margin: 0.5rem 0; }
+        .preview-pane h1 { font-size: 1.25rem; }
+        .preview-pane h2 { font-size: 1.1rem; }
+        .preview-pane p { margin: 0.5rem 0; }
+        .preview-pane code { background: #f3f4f6; padding: 0.1rem 0.3rem; font-family: 'Courier New', monospace; }
+        .preview-pane pre { background: #f3f4f6; padding: 0.5rem; overflow-x: auto; }
+        .panel-footer {
+            border-top: 2px solid #000;
+            padding: 12px 16px;
+            display: flex;
+            justify-content: space-between;
+            background: #f3f4f6;
+        }
+        .btn { font-family: 'Press Start 2P', monospace; font-size: 0.65rem; padding: 8px 14px; border: 2px solid #000; cursor: pointer; text-transform: uppercase; }
+        .btn-primary { background: #1d4ed8; color: white; }
+        .btn-primary:hover { background: #1e40af; }
+        .btn-danger { background: #b91c1c; color: white; }
+        .btn-danger:hover { background: #991b1b; }
+        .btn-ghost { background: white; color: #171717; }
+        .btn-ghost:hover { background: #f3f4f6; }
+    </style>
+</head>
+<body class="bg-neutral-900 text-neutral-100">
+    <div x-data="editorApp()">
+        <div class="pixel-control-bar px-6 py-3 flex items-center justify-between" style="height: 56px;">
+            <div class="flex items-center space-x-4">
+                <h1 class="pixel-text text-white">Adventure Editor</h1>
+                <span class="pixel-text-sm text-neutral-400" x-text="status"></span>
+                <span x-show="dirtyCount() > 0" class="pixel-badge bg-amber-500 text-black">
+                    <span x-text="dirtyCount()"></span> unsaved
+                </span>
+            </div>
+            <div class="flex items-center space-x-3 text-xs">
+                <template x-if="!creating">
+                    <button @click="startCreate()" class="pixel-btn bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5">+ New Chapter</button>
+                </template>
+                <button @click="saveAll()"
+                        :disabled="saving || dirtyCount() === 0"
+                        :class="dirtyCount() > 0 ? 'bg-amber-500 hover:bg-amber-600 text-black' : 'bg-neutral-700 text-neutral-400 cursor-not-allowed'"
+                        class="pixel-btn px-3 py-1.5">
+                    <span x-show="!saving">Save All</span>
+                    <span x-show="saving">Saving...</span>
+                </button>
+                <template x-if="creating">
+                    <div class="flex items-center space-x-2 bg-neutral-800 p-2 border-2 border-emerald-500">
+                        <input type="text" x-model="newId" placeholder="chapter-id"
+                               @keydown.enter="confirmCreate()"
+                               @keydown.escape="cancelCreate()"
+                               x-init="$nextTick(() => $el.focus())"
+                               class="px-2 py-1 text-white bg-neutral-900 border border-neutral-600 text-xs font-mono w-40">
+                        <select x-model="newType" class="px-2 py-1 text-white bg-neutral-900 border border-neutral-600 text-xs">
+                            <option value="story">story</option>
+                            <option value="decision">decision</option>
+                            <option value="game-over">game-over</option>
+                            <option value="terminal">terminal</option>
+                        </select>
+                        <button @click="confirmCreate()" class="pixel-btn bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1">Create</button>
+                        <button @click="cancelCreate()" class="pixel-btn bg-neutral-700 hover:bg-neutral-600 text-white px-3 py-1">Cancel</button>
+                        <span x-show="createError" class="text-red-400" x-text="createError"></span>
+                    </div>
+                </template>
+                <span class="flex items-center space-x-2"><span class="legend-dot" style="background:#1d4ed8"></span><span>story</span></span>
+                <span class="flex items-center space-x-2"><span class="legend-dot" style="background:#b45309"></span><span>decision</span></span>
+                <span class="flex items-center space-x-2"><span class="legend-dot" style="background:#b91c1c"></span><span>game-over</span></span>
+                <span class="flex items-center space-x-2"><span class="legend-dot" style="background:#4b5563"></span><span>terminal</span></span>
+                <button @click="zoomReset()" class="pixel-btn bg-neutral-800 hover:bg-neutral-700 text-white px-3 py-1.5">Reset zoom</button>
+            </div>
+        </div>
+        <div id="drawflow"></div>
+
+        <datalist id="chapter-ids">
+            <template x-for="id in chapterIds" :key="id">
+                <option :value="id"></option>
+            </template>
+        </datalist>
+
+        <aside class="panel" :class="{ 'open': panelOpen }">
+            <div class="panel-header">
+                <span class="pixel-text" x-text="selected ? 'Edit: ' + selected.id : ''"></span>
+                <button @click="closePanel()" class="btn btn-ghost">Close</button>
+            </div>
+            <template x-if="selected">
+                <div class="panel-body">
+                    <label>ID</label>
+                    <input type="text" :value="selected.id" disabled>
+
+                    <div class="row">
+                        <div>
+                            <label>Type</label>
+                            <select x-model="selected.type">
+                                <option value="story">story</option>
+                                <option value="decision">decision</option>
+                                <option value="game-over">game-over</option>
+                                <option value="terminal">terminal</option>
+                            </select>
+                        </div>
+                        <div x-show="selected.type === 'decision'">
+                            <label>Timer (s)</label>
+                            <input type="number" min="0" x-model.number="selected.timer">
+                        </div>
+                    </div>
+
+                    <div class="checkbox-row">
+                        <input type="checkbox" id="terminal-flag" x-model="selected.terminal">
+                        <label for="terminal-flag">Terminal (ends story regardless of next)</label>
+                    </div>
+
+                    <template x-if="selected.type === 'story'">
+                        <div>
+                            <label>Next Chapter</label>
+                            <input type="text" x-model="selected.next" list="chapter-ids" placeholder="chapter-id">
+                        </div>
+                    </template>
+
+                    <template x-if="selected.type === 'decision'">
+                        <div>
+                            <label>Question</label>
+                            <input type="text" x-model="selected.question" placeholder="What should we do?">
+
+                            <label>Choices</label>
+                            <template x-for="(choice, idx) in selected.choices" :key="idx">
+                                <div class="choice-row">
+                                    <div class="row">
+                                        <div>
+                                            <label style="margin-top:0">id</label>
+                                            <input type="text" x-model="choice.ID">
+                                        </div>
+                                        <div>
+                                            <label style="margin-top:0">next</label>
+                                            <input type="text" x-model="choice.Next" list="chapter-ids">
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div>
+                                            <label>label</label>
+                                            <input type="text" x-model="choice.Label">
+                                        </div>
+                                        <div>
+                                            <label>risk</label>
+                                            <select x-model="choice.Risk">
+                                                <option value=""></option>
+                                                <option value="low">low</option>
+                                                <option value="medium">medium</option>
+                                                <option value="high">high</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div>
+                                            <label>description</label>
+                                            <input type="text" x-model="choice.Description">
+                                        </div>
+                                    </div>
+                                    <div class="actions">
+                                        <button @click="removeChoice(idx)" class="btn btn-danger">Remove</button>
+                                    </div>
+                                </div>
+                            </template>
+                            <button @click="addChoice()" class="btn btn-ghost" style="margin-top:8px">+ Add choice</button>
+                        </div>
+                    </template>
+
+                    <label>Markdown</label>
+                    <textarea x-model="selected.raw_md" @input="updatePreview()"></textarea>
+
+                    <label>Preview</label>
+                    <div class="preview-pane" x-html="previewHTML"></div>
+                </div>
+            </template>
+            <div class="panel-footer">
+                <button @click="closePanel()" class="btn btn-ghost">Cancel</button>
+                <button @click="applyChanges()" class="btn btn-primary">Apply</button>
+            </div>
+        </aside>
+    </div>
+
+    <script>
+        function editorApp() {
+            return {
+                editor: null,
+                status: 'loading...',
+                chapters: [],
+                chapterIds: [],
+                drawflowIdByChapter: new Map(),
+                panelOpen: false,
+                selected: null,
+                selectedDrawflowId: null,
+                previewHTML: '',
+                dirty: {},
+                creating: false,
+                newId: '',
+                newType: 'story',
+                createError: '',
+                createOffset: 0,
+                saving: false,
+
+                async init() {
+                    if (typeof Drawflow === 'undefined') {
+                        this.status = 'Drawflow failed to load';
+                        return;
+                    }
+                    const container = document.getElementById('drawflow');
+                    this.editor = new Drawflow(container);
+                    this.editor.start();
+                    this.editor.on('nodeSelected', (id) => this.openPanel(id));
+                    this.editor.on('nodeUnselected', () => { /* keep panel open until close */ });
+
+                    try {
+                        const response = await fetch('/api/story/graph', { credentials: 'include' });
+                        if (!response.ok) {
+                            this.status = 'failed to load graph: ' + response.status;
+                            return;
+                        }
+                        const data = await response.json();
+                        this.chapters = data.chapters;
+                        this.chapterIds = data.chapters.map(c => c.id).sort();
+                        this.renderGraph(data);
+                        this.status = data.chapters.length + ' chapters loaded';
+                    } catch (error) {
+                        console.error(error);
+                        this.status = 'error: ' + error.message;
+                    }
+                },
+
+                async openPanel(drawflowId) {
+                    const node = this.editor.getNodeFromId(drawflowId);
+                    if (!node || !node.data || !node.data.chapterId) return;
+                    const chapterId = node.data.chapterId;
+                    this.selectedDrawflowId = drawflowId;
+
+                    if (this.dirty[chapterId]) {
+                        this.selected = JSON.parse(JSON.stringify(this.dirty[chapterId]));
+                        this.panelOpen = true;
+                        this.updatePreview();
+                        return;
+                    }
+
+                    try {
+                        const response = await fetch('/api/chapter/' + encodeURIComponent(chapterId), { credentials: 'include' });
+                        if (!response.ok) {
+                            this.status = 'failed to load chapter: ' + response.status;
+                            return;
+                        }
+                        const data = await response.json();
+                        const meta = data.metadata || {};
+                        const base = this.chapters.find(c => c.id === chapterId) || {};
+                        this.selected = {
+                            id: chapterId,
+                            type: meta.Type || base.type || 'story',
+                            terminal: !!(meta.Terminal || base.terminal),
+                            next: meta.Next || base.next || '',
+                            question: meta.Question || base.question || '',
+                            timer: meta.Timer || base.timer || 0,
+                            choices: (meta.Choices || base.choices || []).map(c => ({
+                                ID: c.ID || '', Label: c.Label || '', Description: c.Description || '',
+                                Next: c.Next || '', Risk: c.Risk || '', Icon: c.Icon || '',
+                            })),
+                            raw_md: data.raw_md || '',
+                        };
+                        this.panelOpen = true;
+                        this.updatePreview();
+                    } catch (error) {
+                        console.error(error);
+                        this.status = 'error: ' + error.message;
+                    }
+                },
+
+                closePanel() {
+                    this.panelOpen = false;
+                    this.selected = null;
+                    this.selectedDrawflowId = null;
+                    this.previewHTML = '';
+                },
+
+                updatePreview() {
+                    if (!this.selected) { this.previewHTML = ''; return; }
+                    if (typeof marked === 'undefined') { this.previewHTML = '<em>marked not loaded</em>'; return; }
+                    try {
+                        this.previewHTML = marked.parse(this.selected.raw_md || '');
+                    } catch (error) {
+                        this.previewHTML = '<em>preview error: ' + this.escape(error.message) + '</em>';
+                    }
+                },
+
+                addChoice() {
+                    if (!this.selected) return;
+                    if (!this.selected.choices) this.selected.choices = [];
+                    this.selected.choices.push({ ID: '', Label: '', Description: '', Next: '', Risk: '', Icon: '' });
+                },
+
+                removeChoice(idx) {
+                    if (!this.selected || !this.selected.choices) return;
+                    this.selected.choices.splice(idx, 1);
+                },
+
+                applyChanges() {
+                    if (!this.selected) return;
+                    const snapshot = JSON.parse(JSON.stringify(this.selected));
+                    this.dirty[snapshot.id] = snapshot;
+                    this.markNodeDirty(this.selectedDrawflowId);
+                    this.refreshNodeBody(this.selectedDrawflowId, snapshot);
+                    this.rewireNode(this.selectedDrawflowId, snapshot);
+                    this.closePanel();
+                },
+
+                rewireNode(drawflowId, chapter) {
+                    const node = this.editor.getNodeFromId(drawflowId);
+                    if (!node) return;
+
+                    const outputs = node.outputs || {};
+                    for (const [outputClass, output] of Object.entries(outputs)) {
+                        for (const conn of [...(output.connections || [])]) {
+                            try {
+                                this.editor.removeSingleConnection(drawflowId, conn.node, outputClass, conn.output);
+                            } catch (e) { console.warn('removeSingleConnection failed', e); }
+                        }
+                    }
+
+                    const targets = chapter.type === 'decision'
+                        ? (chapter.choices || []).map(c => c.Next).filter(Boolean)
+                        : chapter.next ? [chapter.next] : [];
+
+                    const availableOutputs = Object.keys(outputs).length;
+                    if (targets.length > availableOutputs) {
+                        this.status = 'note: ' + chapter.id + ' has ' + targets.length + ' targets but only ' + availableOutputs + ' ports (resolves on save+reload)';
+                    }
+
+                    targets.slice(0, availableOutputs).forEach((targetId, i) => {
+                        const toId = this.drawflowIdByChapter.get(targetId);
+                        if (!toId) return;
+                        try {
+                            this.editor.addConnection(drawflowId, toId, 'output_' + (i + 1), 'input_1');
+                        } catch (e) { console.warn('addConnection failed', e); }
+                    });
+                },
+
+                markNodeDirty(drawflowId) {
+                    const el = document.getElementById('node-' + drawflowId);
+                    if (el) el.classList.add('dirty');
+                },
+
+                refreshNodeBody(drawflowId, chapter) {
+                    const el = document.getElementById('node-' + drawflowId);
+                    if (!el) return;
+                    const content = el.querySelector('.drawflow_content_node');
+                    if (!content) return;
+                    content.innerHTML = this.nodeHTML(chapter);
+                },
+
+                dirtyCount() {
+                    return Object.keys(this.dirty).length;
+                },
+
+                async saveAll() {
+                    const ids = Object.keys(this.dirty);
+                    if (ids.length === 0 || this.saving) return;
+
+                    this.saving = true;
+                    this.status = 'saving ' + ids.length + ' chapter(s)...';
+                    const failed = [];
+
+                    for (const id of ids) {
+                        const chapter = this.dirty[id];
+                        try {
+                            const response = await fetch('/api/author/chapter', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'include',
+                                body: JSON.stringify(chapter),
+                            });
+                            if (!response.ok) {
+                                const text = await response.text();
+                                failed.push(id + ': ' + text.trim());
+                                continue;
+                            }
+                            delete this.dirty[id];
+                        } catch (error) {
+                            failed.push(id + ': ' + error.message);
+                        }
+                    }
+
+                    this.saving = false;
+
+                    if (failed.length > 0) {
+                        this.status = 'save failed: ' + failed.join(' | ');
+                        return;
+                    }
+
+                    this.status = 'saved. reloading canvas...';
+                    await this.reloadCanvas();
+                },
+
+                async reloadCanvas() {
+                    try {
+                        const response = await fetch('/api/story/graph', { credentials: 'include' });
+                        if (!response.ok) {
+                            this.status = 'reload failed: ' + response.status;
+                            return;
+                        }
+                        const data = await response.json();
+                        this.editor.clear();
+                        this.chapters = data.chapters;
+                        this.chapterIds = data.chapters.map(c => c.id).sort();
+                        this.renderGraph(data);
+                        this.status = data.chapters.length + ' chapters loaded';
+                    } catch (error) {
+                        console.error(error);
+                        this.status = 'reload error: ' + error.message;
+                    }
+                },
+
+                startCreate() {
+                    this.creating = true;
+                    this.newId = '';
+                    this.newType = 'story';
+                    this.createError = '';
+                },
+
+                cancelCreate() {
+                    this.creating = false;
+                    this.createError = '';
+                },
+
+                confirmCreate() {
+                    const id = (this.newId || '').trim();
+                    if (!id) { this.createError = 'id required'; return; }
+                    if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) { this.createError = 'lowercase, digits, hyphens only'; return; }
+                    if (this.chapterIds.includes(id)) { this.createError = 'id already exists'; return; }
+
+                    const outputs = this.newType === 'decision' ? 0
+                        : (this.newType === 'game-over' || this.newType === 'terminal') ? 0
+                        : 1;
+                    const chapter = {
+                        id,
+                        type: this.newType,
+                        terminal: this.newType === 'game-over' || this.newType === 'terminal',
+                        next: '',
+                        question: '',
+                        timer: this.newType === 'decision' ? 30 : 0,
+                        choices: [],
+                        raw_md: '# ' + id + '\n',
+                    };
+
+                    this.createOffset += 40;
+                    const x = 200 + (this.createOffset % 400);
+                    const y = 100 + (this.createOffset % 300);
+
+                    const drawflowId = this.editor.addNode(
+                        id, 1, outputs, x, y, 'chapter-node',
+                        { chapterId: id }, this.nodeHTML(chapter),
+                    );
+
+                    this.chapters.push(chapter);
+                    this.chapterIds = [...this.chapterIds, id].sort();
+                    this.drawflowIdByChapter.set(id, drawflowId);
+                    this.dirty[id] = JSON.parse(JSON.stringify(chapter));
+                    this.markNodeDirty(drawflowId);
+
+                    this.creating = false;
+                    this.newId = '';
+                    this.createError = '';
+
+                    this.selectedDrawflowId = drawflowId;
+                    this.selected = JSON.parse(JSON.stringify(chapter));
+                    this.panelOpen = true;
+                    this.updatePreview();
+                },
+
+                renderGraph(data) {
+                    const byId = new Map(data.chapters.map(c => [c.id, c]));
+                    const layout = this.layeredLayout(data.start, data.chapters);
+
+                    const drawflowIds = this.drawflowIdByChapter;
+                    drawflowIds.clear();
+                    for (const chapter of data.chapters) {
+                        const pos = layout.get(chapter.id) || { x: 50, y: 50 };
+                        const outputs = chapter.type === 'decision'
+                            ? (chapter.choices ? chapter.choices.length : 0)
+                            : (chapter.terminal || chapter.type === 'game-over' || chapter.type === 'terminal' ? 0 : 1);
+                        const html = this.nodeHTML(chapter);
+                        const id = this.editor.addNode(
+                            chapter.id,
+                            1,
+                            outputs,
+                            pos.x, pos.y,
+                            'chapter-node',
+                            { chapterId: chapter.id },
+                            html,
+                        );
+                        drawflowIds.set(chapter.id, id);
+                    }
+
+                    for (const chapter of data.chapters) {
+                        const fromId = drawflowIds.get(chapter.id);
+                        if (chapter.type === 'decision' && chapter.choices) {
+                            chapter.choices.forEach((choice, i) => {
+                                const toId = drawflowIds.get(choice.Next);
+                                if (!toId) return;
+                                this.editor.addConnection(fromId, toId, 'output_' + (i + 1), 'input_1');
+                            });
+                        } else if (chapter.next) {
+                            const toId = drawflowIds.get(chapter.next);
+                            if (toId) this.editor.addConnection(fromId, toId, 'output_1', 'input_1');
+                        }
+                    }
+                },
+
+                nodeHTML(chapter) {
+                    const typeClass =
+                        chapter.type === 'decision' ? 'decision' :
+                        chapter.type === 'game-over' ? 'gameover' :
+                        chapter.type === 'terminal' || chapter.terminal ? 'terminal' : 'story';
+                    const typeLabel = chapter.type || 'story';
+                    let body = '';
+                    if (chapter.question) {
+                        body += `<div class="node-question">${this.escape(chapter.question)}</div>`;
+                    }
+                    if (chapter.type === 'decision' && chapter.choices) {
+                        body += chapter.choices.map(c =>
+                            `<div class="node-choice"><span class="label">${this.escape(c.Label || c.ID)}</span><span class="next">${this.escape(c.Next || '?')}</span></div>`
+                        ).join('');
+                    } else if (chapter.next) {
+                        body += `<div class="node-choice"><span class="label">next</span><span class="next">→ ${this.escape(chapter.next)}</span></div>`;
+                    }
+                    return `
+                        <div class="node-card">
+                            <div class="node-header ${typeClass}">
+                                <span>${typeLabel}</span>
+                                ${chapter.timer ? '<span>' + chapter.timer + 's</span>' : ''}
+                            </div>
+                            <div class="node-id">${this.escape(chapter.id)}</div>
+                            ${body}
+                        </div>`;
+                },
+
+                layeredLayout(startId, chapters) {
+                    const COL_W = 320;
+                    const ROW_H = 200;
+                    const MARGIN_X = 60;
+                    const MARGIN_Y = 60;
+
+                    const byId = new Map(chapters.map(c => [c.id, c]));
+                    const depth = new Map();
+                    if (byId.has(startId)) {
+                        depth.set(startId, 0);
+                        const queue = [startId];
+                        while (queue.length) {
+                            const id = queue.shift();
+                            const c = byId.get(id);
+                            const next = [];
+                            if (c.type === 'decision' && c.choices) c.choices.forEach(ch => ch.Next && next.push(ch.Next));
+                            else if (c.next) next.push(c.next);
+                            const d = depth.get(id);
+                            for (const n of next) {
+                                if (!depth.has(n) && byId.has(n)) {
+                                    depth.set(n, d + 1);
+                                    queue.push(n);
+                                }
+                            }
+                        }
+                    }
+
+                    let orphanDepth = (Math.max(0, ...depth.values()) || 0) + 1;
+                    for (const c of chapters) {
+                        if (!depth.has(c.id)) {
+                            depth.set(c.id, orphanDepth);
+                        }
+                    }
+
+                    const columns = new Map();
+                    for (const [id, d] of depth.entries()) {
+                        if (!columns.has(d)) columns.set(d, []);
+                        columns.get(d).push(id);
+                    }
+
+                    const positions = new Map();
+                    for (const [d, ids] of columns.entries()) {
+                        ids.sort();
+                        ids.forEach((id, i) => {
+                            positions.set(id, { x: MARGIN_X + d * COL_W, y: MARGIN_Y + i * ROW_H });
+                        });
+                    }
+                    return positions;
+                },
+
+                zoomReset() {
+                    if (!this.editor) return;
+                    this.editor.zoom_reset();
+                },
+
+                escape(s) {
+                    return String(s == null ? '' : s)
+                        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+                },
+            }
+        }
+    </script>
+</body>
+</html>

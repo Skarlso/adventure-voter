@@ -85,13 +85,24 @@ type: game-over
 		"index.html": &fstest.MapFile{Data: []byte("<html><body>Test</body></html>")},
 	}
 
-	server, err := NewServer(indexFile, contentDir, mockFS, "", "")
+	server, err := NewServer(indexFile, contentDir, mockFS, "", "", false)
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
 
 	// Start vote manager
 	go server.voteManager.Run()
+
+	return server, tmpDir
+}
+
+// setupAuthorTestServer is like setupTestServer but with author mode enabled,
+// for tests that exercise write endpoints.
+func setupAuthorTestServer(t *testing.T) (*Server, string) {
+	t.Helper()
+
+	server, tmpDir := setupTestServer(t)
+	server.authorMode = true
 
 	return server, tmpDir
 }
@@ -133,7 +144,7 @@ func TestNewServer_InvalidPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewServer(tt.storyPath, tt.contentDir, mockFS, "", "")
+			_, err := NewServer(tt.storyPath, tt.contentDir, mockFS, "", "", false)
 			if err == nil {
 				t.Error("expected error for invalid paths")
 			}
@@ -210,7 +221,7 @@ type: story
 		}
 
 		mockFS := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}
-		server, err := NewServer(indexFile, contentDir, mockFS, "", "https://override.example.com/voter/")
+		server, err := NewServer(indexFile, contentDir, mockFS, "", "https://override.example.com/voter/", false)
 		if err != nil {
 			t.Fatalf("failed to create server: %v", err)
 		}
@@ -228,6 +239,140 @@ type: story
 
 		if response["voter_url"] != "https://override.example.com/voter/" {
 			t.Errorf("voter_url = %q, want %q", response["voter_url"], "https://override.example.com/voter/")
+		}
+	})
+}
+
+func TestHandleAuthorSaveChapter(t *testing.T) {
+	t.Run("disabled when author mode off", func(t *testing.T) {
+		server, tmpDir := setupTestServer(t)
+		defer os.RemoveAll(tmpDir)
+
+		body := `{"id":"new-one","type":"story","raw_md":"# Hi"}`
+		req := httptest.NewRequest("POST", "/api/author/chapter", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		server.router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusForbidden {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusForbidden)
+		}
+	})
+
+	t.Run("rejects invalid id", func(t *testing.T) {
+		server, tmpDir := setupAuthorTestServer(t)
+		defer os.RemoveAll(tmpDir)
+
+		body := `{"id":"../../etc/passwd","type":"story","raw_md":"# Hi"}`
+		req := httptest.NewRequest("POST", "/api/author/chapter", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		server.router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("writes new chapter and reloads engine", func(t *testing.T) {
+		server, tmpDir := setupAuthorTestServer(t)
+		defer os.RemoveAll(tmpDir)
+
+		body := `{
+			"id":"new-chapter",
+			"type":"story",
+			"next":"path-a",
+			"raw_md":"# New Chapter\n\nHello!"
+		}`
+		req := httptest.NewRequest("POST", "/api/author/chapter", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		server.router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusOK, w.Body.String())
+		}
+
+		written, err := os.ReadFile(filepath.Join(server.storyEngine.ContentDir, "new-chapter.md"))
+		if err != nil {
+			t.Fatalf("expected file written: %v", err)
+		}
+		if !strings.Contains(string(written), "id: new-chapter") {
+			t.Errorf("written file missing id; got: %s", written)
+		}
+		if !strings.Contains(string(written), "# New Chapter") {
+			t.Errorf("written file missing body; got: %s", written)
+		}
+
+		if _, ok := server.storyEngine.Story.Nodes["new-chapter"]; !ok {
+			t.Error("expected engine to know about new-chapter after reload")
+		}
+	})
+
+	t.Run("preserves existing filename when id does not match basename", func(t *testing.T) {
+		server, tmpDir := setupAuthorTestServer(t)
+		defer os.RemoveAll(tmpDir)
+
+		body := `{
+			"id":"choice1",
+			"type":"decision",
+			"timer":30,
+			"question":"Updated question",
+			"choices":[{"ID":"opt-a","Label":"A","Next":"path-a"},{"ID":"opt-b","Label":"B","Next":"path-b"}],
+			"raw_md":"# Updated"
+		}`
+		req := httptest.NewRequest("POST", "/api/author/chapter", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		server.router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusOK, w.Body.String())
+		}
+
+		if _, err := os.Stat(filepath.Join(server.storyEngine.ContentDir, "choice1.md")); !os.IsNotExist(err) {
+			t.Errorf("expected no choice1.md to be created; got err = %v", err)
+		}
+
+		written, err := os.ReadFile(filepath.Join(server.storyEngine.ContentDir, "choice.md"))
+		if err != nil {
+			t.Fatalf("expected choice.md to be overwritten: %v", err)
+		}
+		if !strings.Contains(string(written), "Updated question") {
+			t.Errorf("choice.md missing updated body; got: %s", written)
+		}
+	})
+
+	t.Run("overwrites existing chapter", func(t *testing.T) {
+		server, tmpDir := setupAuthorTestServer(t)
+		defer os.RemoveAll(tmpDir)
+
+		body := `{
+			"id":"intro",
+			"type":"story",
+			"next":"choice1",
+			"raw_md":"# Updated Intro"
+		}`
+		req := httptest.NewRequest("POST", "/api/author/chapter", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		server.router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusOK, w.Body.String())
+		}
+
+		updated, err := server.storyEngine.GetChapter("intro")
+		if err != nil {
+			t.Fatalf("get chapter failed: %v", err)
+		}
+		if !strings.Contains(updated.RawMD, "Updated Intro") {
+			t.Errorf("expected reloaded chapter to contain new body; got: %s", updated.RawMD)
 		}
 	})
 }

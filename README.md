@@ -20,6 +20,27 @@ appear instantly.
 ![screen3](./imgs/screen3.png)
 ![screen4](./imgs/screen4.png)
 
+## Editor
+
+Adventure Presenter also got an Editor view. This is to help people not wanting to deal with YAML files, or easily visualize
+connections between the various story chapters and see what points to which next chapter.
+
+![editor1](./imgs/editor-1.png)
+![editor2](./imgs/editor-2.png)
+
+This editor can be used to create an completely new story as well as edit existing one.
+
+To use it, navigate to the Editor section. To actually edit a story, you need to run in `author` mode, which is selected by doing
+
+```bash
+./adventure -author
+```
+
+Otherwise, you can just _view_ a story, but not overwrite it.
+
+I'd like to give my respect to [Drawflow](https://github.com/jerosoler/Drawflow) library which made this much easier than it
+would have been.
+
 ## Why?
 
 Because presentations should be _fun_! I sat through way too many boring presentations which could have a lot better

@@ -1,19 +1,26 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/skarlso/kube_adventures/voting/backend/parser"
+	"gopkg.in/yaml.v3"
 )
+
+var chapterIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
@@ -27,15 +34,17 @@ type Server struct {
 	router          *mux.Router
 	voteManager     *VoteManager
 	storyEngine     *parser.StoryEngine
+	storyPath       string
 	currentNode     string
 	history         []string // breadcrumb of visited chapter IDs
 	staticFS        fs.FS
 	presenterSecret string
 	voterURL        string
+	authorMode      bool
 }
 
 // NewServer creates a new server instance with embedded filesystem.
-func NewServer(storyPath, contentDir string, staticFS fs.FS, presenterSecret, voterURL string) (*Server, error) {
+func NewServer(storyPath, contentDir string, staticFS fs.FS, presenterSecret, voterURL string, authorMode bool) (*Server, error) {
 	engine, err := parser.NewStoryEngine(storyPath, contentDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create story engine: %w", err)
@@ -53,11 +62,13 @@ func NewServer(storyPath, contentDir string, staticFS fs.FS, presenterSecret, vo
 		router:          mux.NewRouter(),
 		voteManager:     NewVoteManager(),
 		storyEngine:     engine,
+		storyPath:       storyPath,
 		currentNode:     engine.Story.Flow.Start,
 		history:         []string{},
 		staticFS:        staticFS,
 		presenterSecret: presenterSecret,
 		voterURL:        voterURL,
+		authorMode:      authorMode,
 	}
 
 	s.setupRoutes()
@@ -76,6 +87,10 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/chapter/{id}", s.handleGetChapter).Methods("GET")
 	api.HandleFunc("/results/{questionId}", s.handleGetResults).Methods("GET")
 
+	// editor (auth-gated)
+	api.HandleFunc("/story/graph", s.requirePresenterAuth(s.handleGetStoryGraph)).Methods("GET")
+	api.HandleFunc("/author/chapter", s.requirePresenterAuth(s.handleAuthorSaveChapter)).Methods("POST")
+
 	// with auth
 	api.HandleFunc("/start-voting", s.requirePresenterAuth(s.handleStartVoting)).Methods("POST")
 	api.HandleFunc("/advance", s.requirePresenterAuth(s.handleAdvance)).Methods("POST")
@@ -87,6 +102,7 @@ func (s *Server) setupRoutes() {
 
 	fileServer := http.FileServer(http.FS(s.staticFS))
 	s.router.PathPrefix("/presenter").Handler(s.requirePresenterAuthMiddleware(fileServer))
+	s.router.PathPrefix("/editor").Handler(s.requirePresenterAuthMiddleware(fileServer))
 	s.router.PathPrefix("/").Handler(fileServer)
 }
 
@@ -187,6 +203,192 @@ func (s *Server) effectiveVoterURL(r *http.Request) string {
 	return fmt.Sprintf("%s://%s/voter/", scheme, host)
 }
 
+// handleGetStoryGraph returns every chapter as a flat array suitable for the editor canvas.
+func (s *Server) handleGetStoryGraph(w http.ResponseWriter, r *http.Request) {
+	chapters, err := s.storyEngine.AllChapters()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+
+		return
+	}
+
+	type graphChapter struct {
+		ID       string          `json:"id"`
+		Type     string          `json:"type"`
+		Terminal bool            `json:"terminal"`
+		Next     string          `json:"next,omitempty"`
+		Question string          `json:"question,omitempty"`
+		Timer    int             `json:"timer,omitempty"`
+		Choices  []parser.Choice `json:"choices,omitempty"`
+	}
+
+	out := make([]graphChapter, 0, len(chapters))
+
+	for id, chapter := range chapters {
+		out = append(out, graphChapter{
+			ID:       id,
+			Type:     chapter.Metadata.Type,
+			Terminal: chapter.Metadata.Terminal,
+			Next:     chapter.Metadata.Next,
+			Question: chapter.Metadata.Question,
+			Timer:    chapter.Metadata.Timer,
+			Choices:  chapter.Metadata.Choices,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"start":    s.storyEngine.Story.Flow.Start,
+		"chapters": out,
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+
+		return
+	}
+}
+
+// handleAuthorSaveChapter writes a single chapter to disk and reloads the story engine.
+// Requires the server to have been started with -author.
+func (s *Server) handleAuthorSaveChapter(w http.ResponseWriter, r *http.Request) {
+	if !s.authorMode {
+		http.Error(w, "author mode disabled (start with -author)", http.StatusForbidden)
+
+		return
+	}
+
+	var req struct {
+		ID       string          `json:"id"`
+		Type     string          `json:"type"`
+		Terminal bool            `json:"terminal"`
+		Next     string          `json:"next"`
+		Question string          `json:"question"`
+		Timer    int             `json:"timer"`
+		Choices  []parser.Choice `json:"choices"`
+		RawMD    string          `json:"raw_md"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil { //nolint:musttag // ignore
+		http.Error(w, err.Error(), http.StatusBadRequest)
+
+		return
+	}
+
+	path, err := s.chapterFilePath(req.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+
+		return
+	}
+
+	meta := parser.ChapterMetadata{
+		ID:       req.ID,
+		Type:     req.Type,
+		Terminal: req.Terminal,
+		Next:     req.Next,
+		Question: req.Question,
+		Timer:    req.Timer,
+		Choices:  req.Choices,
+	}
+
+	content, err := buildChapterFile(meta, req.RawMD)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+
+		return
+	}
+
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+
+		return
+	}
+
+	if err := s.reloadStoryEngine(); err != nil {
+		http.Error(w, "saved but reload failed: "+err.Error(), http.StatusInternalServerError)
+
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"status": "saved",
+		"id":     req.ID,
+		"path":   filepath.Base(path),
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+
+		return
+	}
+}
+
+// chapterFilePath validates a chapter ID and returns its on-disk path,
+// preserving the existing filename when the chapter is already known to the
+// engine (authors may use prefixes like 04-etcd-choice.md for ordering).
+// Guards against path traversal.
+func (s *Server) chapterFilePath(id string) (string, error) {
+	if !chapterIDPattern.MatchString(id) {
+		return "", fmt.Errorf("invalid chapter id %q (lowercase, digits, hyphens only)", id)
+	}
+
+	contentDir := s.storyEngine.ContentDir
+
+	filename := id + ".md"
+	if node, ok := s.storyEngine.Story.Nodes[id]; ok && node.File != "" {
+		filename = node.File
+	}
+
+	candidate := filepath.Clean(filepath.Join(contentDir, filename))
+
+	rel, err := filepath.Rel(contentDir, candidate)
+	if err != nil || strings.HasPrefix(rel, "..") || strings.ContainsRune(rel, filepath.Separator) {
+		return "", fmt.Errorf("invalid chapter path") //nolint:perfsprint // https://go.dev/cl/708836
+	}
+
+	return candidate, nil
+}
+
+// buildChapterFile renders front-matter + body into the on-disk markdown format.
+func buildChapterFile(meta parser.ChapterMetadata, body string) ([]byte, error) {
+	fm, err := yaml.Marshal(&meta)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal frontmatter: %w", err)
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("---\n")
+	buf.Write(fm)
+	buf.WriteString("---\n")
+
+	if body != "" && !strings.HasPrefix(body, "\n") {
+		buf.WriteString("\n")
+	}
+
+	buf.WriteString(body)
+
+	if !strings.HasSuffix(body, "\n") {
+		buf.WriteString("\n")
+	}
+
+	return buf.Bytes(), nil
+}
+
+// reloadStoryEngine rebuilds the engine from disk after a write so subsequent
+// reads see the new chapter set. Holds the server lock to keep readers consistent.
+func (s *Server) reloadStoryEngine() error {
+	engine, err := parser.NewStoryEngine(s.storyPath, s.storyEngine.ContentDir)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.storyEngine = engine
+	s.mu.Unlock()
+
+	return nil
+}
+
 // handleGetChapter returns a specific chapter by ID.
 func (s *Server) handleGetChapter(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -205,6 +407,7 @@ func (s *Server) handleGetChapter(w http.ResponseWriter, r *http.Request) {
 		"id":       chapterID,
 		"metadata": chapter.Metadata,
 		"content":  chapter.Content,
+		"raw_md":   chapter.RawMD,
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 
@@ -231,6 +434,7 @@ func (s *Server) handleGetCurrentChapter(w http.ResponseWriter, r *http.Request)
 		"id":       currentNode,
 		"metadata": chapter.Metadata,
 		"content":  chapter.Content,
+		"raw_md":   chapter.RawMD,
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 

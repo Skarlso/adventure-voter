@@ -177,6 +177,22 @@ func (se *StoryEngine) GetChapterByChoice(currentNodeID, choiceID string) (*Chap
 	return nil, fmt.Errorf("choice not found: %s", choiceID)
 }
 
+// AllChapters returns every parsed chapter known to the engine, keyed by node ID.
+func (se *StoryEngine) AllChapters() (map[string]*Chapter, error) {
+	out := make(map[string]*Chapter, len(se.Story.Nodes))
+
+	for id := range se.Story.Nodes {
+		chapter, err := se.GetChapter(id)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load chapter %s: %w", id, err)
+		}
+
+		out[id] = chapter
+	}
+
+	return out, nil
+}
+
 // ValidateStory checks if all nodes and files exist.
 func (se *StoryEngine) ValidateStory() []error {
 	var errors []error
