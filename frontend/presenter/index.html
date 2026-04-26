@@ -7,6 +7,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
     <link rel="stylesheet" href="/assets/pixel.css">
     <script>
         tailwind.config = {
@@ -114,6 +115,14 @@
                     <div class="pixel-badge bg-neutral-800 text-white">
                         <span x-text="totalVotes"></span> votes
                     </div>
+
+                    <!-- QR Code (click to enlarge) -->
+                    <button @click="showQRModal = true"
+                            x-show="qrSvg"
+                            title="Show voter QR code"
+                            class="pixel-btn bg-white p-1 leading-none">
+                        <span class="block w-10 h-10" x-html="qrSvg"></span>
+                    </button>
 
                     <!-- Dark Mode Toggle -->
                     <button @click="toggleDarkMode()"
@@ -261,6 +270,26 @@
                     </button>
                 </div>
 
+                <!-- QR Modal -->
+                <div x-show="showQRModal"
+                     x-transition.opacity
+                     @keydown.escape.window="showQRModal = false"
+                     @click="showQRModal = false"
+                     class="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-6"
+                     style="display: none;">
+                    <div @click.stop class="pixel-box bg-white p-8 text-center max-w-lg">
+                        <h2 class="pixel-heading text-lg mb-4 text-neutral-900">Scan to Vote</h2>
+                        <div class="flex justify-center mb-4">
+                            <div class="w-80 h-80 bg-white p-3 border-4 border-black" x-html="qrSvgLarge"></div>
+                        </div>
+                        <p class="pixel-text-sm text-neutral-700 break-all mb-6" x-text="voterURL"></p>
+                        <button @click="showQRModal = false"
+                                class="pixel-btn bg-neutral-900 hover:bg-neutral-800 text-white px-8 py-3">
+                            Close
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Terminal/End State -->
                 <div x-show="isTerminal" class="text-center mt-8 space-y-4">
                     <div class="pixel-box p-8">
@@ -304,11 +333,39 @@
                 canGoBack: false,
                 question: '',
                 darkMode: false,
+                voterURL: '',
+                qrSvg: '',
+                qrSvgLarge: '',
+                showQRModal: false,
 
                 init() {
                     this.loadDarkMode();
+                    this.loadVoterURL();
                     this.loadCurrentChapter();
                     this.connectWebSocket();
+                },
+
+                async loadVoterURL() {
+                    try {
+                        const response = await fetch('/api/config');
+                        const data = await response.json();
+                        this.voterURL = data.voter_url || (window.location.origin + '/voter/');
+                    } catch (error) {
+                        console.error('Failed to load config:', error);
+                        this.voterURL = window.location.origin + '/voter/';
+                    }
+                    this.renderQR();
+                },
+
+                renderQR() {
+                    if (typeof QRCode === 'undefined' || !this.voterURL) return;
+                    const opts = { type: 'svg', margin: 1, errorCorrectionLevel: 'M' };
+                    QRCode.toString(this.voterURL, opts, (err, svg) => {
+                        if (!err) this.qrSvg = svg;
+                    });
+                    QRCode.toString(this.voterURL, { ...opts, margin: 2, errorCorrectionLevel: 'Q' }, (err, svg) => {
+                        if (!err) this.qrSvgLarge = svg;
+                    });
                 },
 
                 loadDarkMode() {

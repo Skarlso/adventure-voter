@@ -31,10 +31,11 @@ type Server struct {
 	history         []string // breadcrumb of visited chapter IDs
 	staticFS        fs.FS
 	presenterSecret string
+	voterURL        string
 }
 
 // NewServer creates a new server instance with embedded filesystem.
-func NewServer(storyPath, contentDir string, staticFS fs.FS, presenterSecret string) (*Server, error) {
+func NewServer(storyPath, contentDir string, staticFS fs.FS, presenterSecret, voterURL string) (*Server, error) {
 	engine, err := parser.NewStoryEngine(storyPath, contentDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create story engine: %w", err)
@@ -56,6 +57,7 @@ func NewServer(storyPath, contentDir string, staticFS fs.FS, presenterSecret str
 		history:         []string{},
 		staticFS:        staticFS,
 		presenterSecret: presenterSecret,
+		voterURL:        voterURL,
 	}
 
 	s.setupRoutes()
@@ -69,6 +71,7 @@ func (s *Server) setupRoutes() {
 	api := s.router.PathPrefix("/api").Subrouter()
 
 	// no auth
+	api.HandleFunc("/config", s.handleGetConfig).Methods("GET")
 	api.HandleFunc("/chapter/current", s.handleGetCurrentChapter).Methods("GET")
 	api.HandleFunc("/chapter/{id}", s.handleGetChapter).Methods("GET")
 	api.HandleFunc("/results/{questionId}", s.handleGetResults).Methods("GET")
@@ -144,6 +147,44 @@ func (s *Server) requirePresenterAuthMiddleware(next http.Handler) http.Handler 
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// handleGetConfig returns runtime configuration consumed by the frontend,
+// currently the public voter URL used for QR codes.
+func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"voter_url": s.effectiveVoterURL(r),
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+
+		return
+	}
+}
+
+// effectiveVoterURL returns the configured voter URL, or one derived from the
+// request, honoring X-Forwarded-Proto / X-Forwarded-Host when behind a proxy.
+func (s *Server) effectiveVoterURL(r *http.Request) string {
+	if s.voterURL != "" {
+		return s.voterURL
+	}
+
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	}
+
+	host := r.Host
+	if h := r.Header.Get("X-Forwarded-Host"); h != "" {
+		host = h
+	}
+
+	return fmt.Sprintf("%s://%s/voter/", scheme, host)
 }
 
 // handleGetChapter returns a specific chapter by ID.
