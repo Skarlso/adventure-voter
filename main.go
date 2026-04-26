@@ -25,6 +25,7 @@ func main() {
 	storyFile := flag.String("story", "content/story.yaml", "Path to story.yaml file")
 	presenterSecret := flag.String("presenter-secret", "", "Presenter authentication secret (optional, disables auth if empty)")
 	voterURL := flag.String("voter-url", "", "Public voter URL for QR codes (optional, derived from request when empty)")
+	authorMode := flag.Bool("author", false, "Enable story authoring endpoints (writes to content directory)")
 	versionFlag := flag.Bool("version", false, "Print version and exit")
 
 	flag.Parse()
@@ -55,7 +56,7 @@ func main() {
 		log.Fatalf("Failed to get embedded frontend: %v", err)
 	}
 
-	srv, err := server.NewServer(absStoryFile, absContentDir, embeddedFS, *presenterSecret, *voterURL)
+	srv, err := server.NewServer(absStoryFile, absContentDir, embeddedFS, *presenterSecret, *voterURL, *authorMode)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
 	}
