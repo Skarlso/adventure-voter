@@ -85,7 +85,7 @@ type: game-over
 		"index.html": &fstest.MapFile{Data: []byte("<html><body>Test</body></html>")},
 	}
 
-	server, err := NewServer(indexFile, contentDir, mockFS, "")
+	server, err := NewServer(indexFile, contentDir, mockFS, "", "")
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
@@ -133,12 +133,103 @@ func TestNewServer_InvalidPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewServer(tt.storyPath, tt.contentDir, mockFS, "")
+			_, err := NewServer(tt.storyPath, tt.contentDir, mockFS, "", "")
 			if err == nil {
 				t.Error("expected error for invalid paths")
 			}
 		})
 	}
+}
+
+func TestHandleGetConfig(t *testing.T) {
+	t.Run("derives voter url from request", func(t *testing.T) {
+		server, tmpDir := setupTestServer(t)
+		defer os.RemoveAll(tmpDir)
+
+		req := httptest.NewRequest("GET", "/api/config", nil)
+		req.Host = "talk.example.com"
+		w := httptest.NewRecorder()
+
+		server.router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+
+		var response map[string]any
+		if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if response["voter_url"] != "http://talk.example.com/voter/" {
+			t.Errorf("voter_url = %q, want %q", response["voter_url"], "http://talk.example.com/voter/")
+		}
+	})
+
+	t.Run("honors X-Forwarded-Proto and X-Forwarded-Host", func(t *testing.T) {
+		server, tmpDir := setupTestServer(t)
+		defer os.RemoveAll(tmpDir)
+
+		req := httptest.NewRequest("GET", "/api/config", nil)
+		req.Host = "internal:8080"
+		req.Header.Set("X-Forwarded-Proto", "https")
+		req.Header.Set("X-Forwarded-Host", "vote.example.com")
+		w := httptest.NewRecorder()
+
+		server.router.ServeHTTP(w, req)
+
+		var response map[string]any
+		if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if response["voter_url"] != "https://vote.example.com/voter/" {
+			t.Errorf("voter_url = %q, want %q", response["voter_url"], "https://vote.example.com/voter/")
+		}
+	})
+
+	t.Run("explicit voter url overrides request", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		contentDir := filepath.Join(tmpDir, "chapters")
+		if err := os.Mkdir(contentDir, 0755); err != nil {
+			t.Fatalf("failed to create content dir: %v", err)
+		}
+
+		indexFile := filepath.Join(tmpDir, "story.yaml")
+		if err := os.WriteFile(indexFile, []byte("start: intro"), 0600); err != nil {
+			t.Fatalf("failed to create index file: %v", err)
+		}
+
+		chapter := `---
+id: intro
+type: story
+---
+# Intro`
+		if err := os.WriteFile(filepath.Join(contentDir, "intro.md"), []byte(chapter), 0600); err != nil {
+			t.Fatalf("failed to write chapter: %v", err)
+		}
+
+		mockFS := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}
+		server, err := NewServer(indexFile, contentDir, mockFS, "", "https://override.example.com/voter/")
+		if err != nil {
+			t.Fatalf("failed to create server: %v", err)
+		}
+
+		req := httptest.NewRequest("GET", "/api/config", nil)
+		req.Host = "ignored.example.com"
+		w := httptest.NewRecorder()
+
+		server.router.ServeHTTP(w, req)
+
+		var response map[string]any
+		if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if response["voter_url"] != "https://override.example.com/voter/" {
+			t.Errorf("voter_url = %q, want %q", response["voter_url"], "https://override.example.com/voter/")
+		}
+	})
 }
 
 func TestHandleGetCurrentChapter(t *testing.T) {
