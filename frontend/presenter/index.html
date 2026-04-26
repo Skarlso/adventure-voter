@@ -7,7 +7,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
     <link rel="stylesheet" href="/assets/pixel.css">
     <script>
         tailwind.config = {
@@ -118,10 +118,14 @@
 
                     <!-- QR Code (click to enlarge) -->
                     <button @click="showQRModal = true"
-                            x-show="qrSvg"
                             title="Show voter QR code"
-                            class="pixel-btn bg-white p-1 leading-none">
-                        <span class="block w-10 h-10" x-html="qrSvg"></span>
+                            class="pixel-btn bg-white text-neutral-900 px-2 py-1 leading-none">
+                        <template x-if="qrSvg">
+                            <span class="block w-10 h-10 [&>svg]:w-full [&>svg]:h-full" x-html="qrSvg"></span>
+                        </template>
+                        <template x-if="!qrSvg">
+                            <span class="pixel-text-sm">QR</span>
+                        </template>
                     </button>
 
                     <!-- Dark Mode Toggle -->
@@ -280,7 +284,7 @@
                     <div @click.stop class="pixel-box bg-white p-8 text-center max-w-lg">
                         <h2 class="pixel-heading text-lg mb-4 text-neutral-900">Scan to Vote</h2>
                         <div class="flex justify-center mb-4">
-                            <div class="w-80 h-80 bg-white p-3 border-4 border-black" x-html="qrSvgLarge"></div>
+                            <div class="w-80 h-80 bg-white p-3 border-4 border-black [&>svg]:w-full [&>svg]:h-full" x-html="qrSvgLarge"></div>
                         </div>
                         <p class="pixel-text-sm text-neutral-700 break-all mb-6" x-text="voterURL"></p>
                         <button @click="showQRModal = false"
@@ -358,14 +362,23 @@
                 },
 
                 renderQR() {
-                    if (typeof QRCode === 'undefined' || !this.voterURL) return;
-                    const opts = { type: 'svg', margin: 1, errorCorrectionLevel: 'M' };
-                    QRCode.toString(this.voterURL, opts, (err, svg) => {
-                        if (!err) this.qrSvg = svg;
-                    });
-                    QRCode.toString(this.voterURL, { ...opts, margin: 2, errorCorrectionLevel: 'Q' }, (err, svg) => {
-                        if (!err) this.qrSvgLarge = svg;
-                    });
+                    if (!this.voterURL) {
+                        console.warn('QR: voterURL is empty, skipping render');
+                        return;
+                    }
+                    if (typeof qrcode !== 'function') {
+                        console.error('QR: qrcode-generator script did not load (check network/CSP for jsdelivr)');
+                        return;
+                    }
+                    try {
+                        const qr = qrcode(0, 'M');
+                        qr.addData(this.voterURL);
+                        qr.make();
+                        this.qrSvg = qr.createSvgTag({ scalable: true, margin: 1 });
+                        this.qrSvgLarge = qr.createSvgTag({ scalable: true, margin: 2 });
+                    } catch (error) {
+                        console.error('QR render failed:', error);
+                    }
                 },
 
                 loadDarkMode() {
