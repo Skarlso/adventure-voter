@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,9 +42,10 @@ func TestStartVoting(t *testing.T) {
 	choices := []string{"choice-a", "choice-b", "choice-c"}
 	duration := 100 * time.Millisecond
 
-	completed := false
+	var completed atomic.Bool
+
 	vm.StartVoting(questionID, choices, duration, func(results map[string]int, winner string) {
-		completed = true
+		completed.Store(true)
 	})
 
 	if !vm.IsVotingActive() {
@@ -71,7 +73,7 @@ func TestStartVoting(t *testing.T) {
 	// Wait for timer to complete
 	time.Sleep(150 * time.Millisecond)
 
-	if !completed {
+	if !completed.Load() {
 		t.Error("onComplete callback should have been called")
 	}
 
@@ -109,7 +111,9 @@ func TestStartVotingWithChoices(t *testing.T) {
 func TestSubmitVote(t *testing.T) {
 	vm := NewVoteManager()
 	go vm.Run()
-	defer close(vm.broadcast)
+	// disarm rather than close: a pending AfterFunc still sends on this channel,
+	// and Run() spins forever once it is closed
+	defer vm.StopVoting()
 
 	questionID := "test-question"
 	choices := []string{"choice-a", "choice-b"}
@@ -145,7 +149,9 @@ func TestSubmitVote(t *testing.T) {
 func TestSubmitVote_ChangeVote(t *testing.T) {
 	vm := NewVoteManager()
 	go vm.Run()
-	defer close(vm.broadcast)
+	// disarm rather than close: a pending AfterFunc still sends on this channel,
+	// and Run() spins forever once it is closed
+	defer vm.StopVoting()
 
 	questionID := "test-question"
 	choices := []string{"choice-a", "choice-b"}
@@ -191,7 +197,9 @@ func TestSubmitVote_WhenInactive(t *testing.T) {
 func TestEndVoting(t *testing.T) {
 	vm := NewVoteManager()
 	go vm.Run()
-	defer close(vm.broadcast)
+	// disarm rather than close: a pending AfterFunc still sends on this channel,
+	// and Run() spins forever once it is closed
+	defer vm.StopVoting()
 
 	questionID := "test-question"
 	choices := []string{"choice-a", "choice-b"}
@@ -247,9 +255,9 @@ func TestDetermineWinner(t *testing.T) {
 			wantWinner: "a",
 		},
 		{
-			name:       "tie - first in map wins",
+			name:       "tie - resolves deterministically",
 			results:    map[string]int{"a": 3, "b": 3},
-			wantWinner: "", // Could be either, depends on map iteration
+			wantWinner: "a",
 		},
 		{
 			name:       "no votes",
@@ -266,12 +274,7 @@ func TestDetermineWinner(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			winner := vm.determineWinner(tt.results)
-			if tt.name == "tie - first in map wins" {
-				// For ties, just verify it's one of the tied choices
-				if winner != "a" && winner != "b" && winner != "" {
-					t.Errorf("winner = %q, want 'a', 'b', or ''", winner)
-				}
-			} else if winner != tt.wantWinner {
+			if winner != tt.wantWinner {
 				t.Errorf("winner = %q, want %q", winner, tt.wantWinner)
 			}
 		})
@@ -281,7 +284,9 @@ func TestDetermineWinner(t *testing.T) {
 func TestGetResults(t *testing.T) {
 	vm := NewVoteManager()
 	go vm.Run()
-	defer close(vm.broadcast)
+	// disarm rather than close: a pending AfterFunc still sends on this channel,
+	// and Run() spins forever once it is closed
+	defer vm.StopVoting()
 
 	questionID := "test-question"
 	choices := []string{"choice-a", "choice-b"}
@@ -307,7 +312,9 @@ func TestGetResults(t *testing.T) {
 func TestResetVoting(t *testing.T) {
 	vm := NewVoteManager()
 	go vm.Run()
-	defer close(vm.broadcast)
+	// disarm rather than close: a pending AfterFunc still sends on this channel,
+	// and Run() spins forever once it is closed
+	defer vm.StopVoting()
 
 	// Start voting and submit some votes
 	vm.StartVoting("q1", []string{"a", "b"}, 1*time.Second, nil)
@@ -336,7 +343,9 @@ func TestResetVoting(t *testing.T) {
 func TestClearQuestionVotes(t *testing.T) {
 	vm := NewVoteManager()
 	go vm.Run()
-	defer close(vm.broadcast)
+	// disarm rather than close: a pending AfterFunc still sends on this channel,
+	// and Run() spins forever once it is closed
+	defer vm.StopVoting()
 
 	// Create votes for multiple questions
 	vm.StartVoting("q1", []string{"a", "b"}, 1*time.Second, nil)
@@ -363,7 +372,9 @@ func TestClearQuestionVotes(t *testing.T) {
 func TestHandleVoteMessage(t *testing.T) {
 	vm := NewVoteManager()
 	go vm.Run()
-	defer close(vm.broadcast)
+	// disarm rather than close: a pending AfterFunc still sends on this channel,
+	// and Run() spins forever once it is closed
+	defer vm.StopVoting()
 
 	vm.StartVoting("test-q", []string{"a", "b"}, 1*time.Second, nil)
 
@@ -408,7 +419,9 @@ func TestHandleVoteMessage(t *testing.T) {
 func TestConcurrentVoting(t *testing.T) {
 	vm := NewVoteManager()
 	go vm.Run()
-	defer close(vm.broadcast)
+	// disarm rather than close: a pending AfterFunc still sends on this channel,
+	// and Run() spins forever once it is closed
+	defer vm.StopVoting()
 
 	questionID := "concurrent-test"
 	choices := []string{"a", "b", "c"}
@@ -446,23 +459,16 @@ func TestConcurrentVoting(t *testing.T) {
 
 func TestBroadcastMessage(t *testing.T) {
 	vm := NewVoteManager()
-	go vm.Run()
 
-	// Create a mock client channel
-	received := make(chan *Message, 1)
-
-	// Send a broadcast
-	go func() {
-		msg := <-vm.broadcast
-		received <- msg
-	}()
-
+	// deliberately no vm.Run(): the hub would race this test for the message and
+	// win often enough to make the assertion flaky. The channel is buffered, so
+	// BroadcastMessage lands without a reader.
 	vm.BroadcastMessage("test_event", map[string]any{
 		"key": "value",
 	})
 
 	select {
-	case msg := <-received:
+	case msg := <-vm.broadcast:
 		if msg.Type != "test_event" {
 			t.Errorf("message type = %q, want %q", msg.Type, "test_event")
 		}
@@ -501,4 +507,38 @@ func TestMessageSerialization(t *testing.T) {
 	if decoded.Payload["string"] != "value" {
 		t.Error("payload not correctly serialized/deserialized")
 	}
+}
+
+func TestDetermineWinner_TieFollowsDeclarationOrder(t *testing.T) {
+	vm := NewVoteManager()
+	go vm.Run()
+
+	// opt-b is declared first, so it takes a tie even though "opt-a" sorts lower
+	vm.StartVotingWithChoices("q", []string{"opt-b", "opt-a"}, nil, "", time.Hour, nil)
+
+	results := map[string]int{"opt-a": 3, "opt-b": 3}
+
+	for range 20 {
+		if winner := vm.determineWinner(results); winner != "opt-b" {
+			t.Fatalf("winner = %q, want %q on every call", winner, "opt-b")
+		}
+	}
+
+	vm.StopVoting()
+}
+
+func TestDetermineWinner_IgnoresUndeclaredChoices(t *testing.T) {
+	vm := NewVoteManager()
+	go vm.Run()
+
+	vm.StartVotingWithChoices("q", []string{"opt-a", "opt-b"}, nil, "", time.Hour, nil)
+
+	// a client can put any choice_id on the wire; it must never win the vote
+	results := map[string]int{"opt-a": 1, "opt-b": 0, "injected": 999}
+
+	if winner := vm.determineWinner(results); winner != "opt-a" {
+		t.Errorf("winner = %q, want %q", winner, "opt-a")
+	}
+
+	vm.StopVoting()
 }

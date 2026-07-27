@@ -286,21 +286,21 @@
                                     <div class="row">
                                         <div>
                                             <label style="margin-top:0">id</label>
-                                            <input type="text" x-model="choice.ID">
+                                            <input type="text" x-model="choice.id">
                                         </div>
                                         <div>
                                             <label style="margin-top:0">next</label>
-                                            <input type="text" x-model="choice.Next" list="chapter-ids">
+                                            <input type="text" x-model="choice.next" list="chapter-ids">
                                         </div>
                                     </div>
                                     <div class="row">
                                         <div>
                                             <label>label</label>
-                                            <input type="text" x-model="choice.Label">
+                                            <input type="text" x-model="choice.label">
                                         </div>
                                         <div>
                                             <label>risk</label>
-                                            <select x-model="choice.Risk">
+                                            <select x-model="choice.risk">
                                                 <option value=""></option>
                                                 <option value="low">low</option>
                                                 <option value="medium">medium</option>
@@ -311,7 +311,7 @@
                                     <div class="row">
                                         <div>
                                             <label>description</label>
-                                            <input type="text" x-model="choice.Description">
+                                            <input type="text" x-model="choice.description">
                                         </div>
                                     </div>
                                     <div class="actions">
@@ -409,14 +409,14 @@
                         const base = this.chapters.find(c => c.id === chapterId) || {};
                         this.selected = {
                             id: chapterId,
-                            type: meta.Type || base.type || 'story',
-                            terminal: !!(meta.Terminal || base.terminal),
-                            next: meta.Next || base.next || '',
-                            question: meta.Question || base.question || '',
-                            timer: meta.Timer || base.timer || 0,
-                            choices: (meta.Choices || base.choices || []).map(c => ({
-                                ID: c.ID || '', Label: c.Label || '', Description: c.Description || '',
-                                Next: c.Next || '', Risk: c.Risk || '', Icon: c.Icon || '',
+                            type: meta.type || base.type || 'story',
+                            terminal: !!(meta.terminal || base.terminal),
+                            next: meta.next || base.next || '',
+                            question: meta.question || base.question || '',
+                            timer: meta.timer || base.timer || 0,
+                            choices: (meta.choices || base.choices || []).map(c => ({
+                                id: c.id || '', label: c.label || '', description: c.description || '',
+                                next: c.next || '', risk: c.risk || '', icon: c.icon || '',
                             })),
                             raw_md: data.raw_md || '',
                         };
@@ -448,7 +448,7 @@
                 addChoice() {
                     if (!this.selected) return;
                     if (!this.selected.choices) this.selected.choices = [];
-                    this.selected.choices.push({ ID: '', Label: '', Description: '', Next: '', Risk: '', Icon: '' });
+                    this.selected.choices.push({ id: '', label: '', description: '', next: '', risk: '', icon: '' });
                 },
 
                 removeChoice(idx) {
@@ -480,7 +480,7 @@
                     }
 
                     const targets = chapter.type === 'decision'
-                        ? (chapter.choices || []).map(c => c.Next).filter(Boolean)
+                        ? (chapter.choices || []).map(c => c.next).filter(Boolean)
                         : chapter.next ? [chapter.next] : [];
 
                     const availableOutputs = Object.keys(outputs).length;
@@ -657,7 +657,7 @@
                         const fromId = drawflowIds.get(chapter.id);
                         if (chapter.type === 'decision' && chapter.choices) {
                             chapter.choices.forEach((choice, i) => {
-                                const toId = drawflowIds.get(choice.Next);
+                                const toId = drawflowIds.get(choice.next);
                                 if (!toId) return;
                                 this.editor.addConnection(fromId, toId, 'output_' + (i + 1), 'input_1');
                             });
@@ -680,7 +680,7 @@
                     }
                     if (chapter.type === 'decision' && chapter.choices) {
                         body += chapter.choices.map(c =>
-                            `<div class="node-choice"><span class="label">${this.escape(c.Label || c.ID)}</span><span class="next">${this.escape(c.Next || '?')}</span></div>`
+                            `<div class="node-choice"><span class="label">${this.escape(c.label || c.id)}</span><span class="next">${this.escape(c.next || '?')}</span></div>`
                         ).join('');
                     } else if (chapter.next) {
                         body += `<div class="node-choice"><span class="label">next</span><span class="next">→ ${this.escape(chapter.next)}</span></div>`;
@@ -711,7 +711,7 @@
                             const id = queue.shift();
                             const c = byId.get(id);
                             const next = [];
-                            if (c.type === 'decision' && c.choices) c.choices.forEach(ch => ch.Next && next.push(ch.Next));
+                            if (c.type === 'decision' && c.choices) c.choices.forEach(ch => ch.next && next.push(ch.next));
                             else if (c.next) next.push(c.next);
                             const d = depth.get(id);
                             for (const n of next) {

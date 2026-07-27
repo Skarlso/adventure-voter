@@ -3,6 +3,7 @@ package parser
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -476,4 +477,31 @@ type: game-over
 	}
 
 	return engine, tmpDir
+}
+
+// TestGetChapterConcurrent guards the lazy chapter cache. Handlers hit
+// GetChapter from independent goroutines, and an unsynchronised map write there
+// is a fatal, unrecoverable runtime error. Run with -race.
+func TestGetChapterConcurrent(t *testing.T) {
+	engine, tmpDir := setupTestEngine(t)
+	defer os.RemoveAll(tmpDir)
+
+	ids := []string{"intro", "choice1", "path-a", "path-b"}
+
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			for _, id := range ids {
+				if _, err := engine.GetChapter(id); err != nil {
+					t.Errorf("GetChapter(%q) failed: %v", id, err)
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
 }

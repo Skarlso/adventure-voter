@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 type VoteManager struct {
 	mu              sync.RWMutex
 	currentQuestion string
+	choiceOrder     []string                  // declaration order of the current question's choices
 	votes           map[string]map[string]int // questionID -> choiceID -> count
 	voters          map[string]string         // voterID -> choiceID (for current question)
 	clients         map[*websocket.Conn]bool
@@ -100,6 +102,7 @@ func (vm *VoteManager) StartVotingWithChoices(questionID string, choiceIDs []str
 
 	// reset state
 	vm.currentQuestion = questionID
+	vm.choiceOrder = slices.Clone(choiceIDs)
 	vm.voters = make(map[string]string)
 	vm.votingActive = true
 	vm.timerDuration = duration
@@ -198,13 +201,39 @@ func (vm *VoteManager) EndVoting() {
 	}
 }
 
-// determineWinner finds the choice with the most votes.
+// StopVoting disarms an in-flight voting session without clearing the tally or
+// broadcasting. Used when the presenter advances manually before the timer
+// expires, so the pending AfterFunc cannot fire "voting_ended" for the previous
+// question on top of the next chapter.
+func (vm *VoteManager) StopVoting() {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+
+	if vm.timer != nil {
+		vm.timer.Stop()
+		vm.timer = nil
+	}
+
+	vm.votingActive = false
+	vm.choiceOrder = nil
+	vm.onVoteComplete = nil
+}
+
+// determineWinner finds the choice with the most votes. Iteration follows the
+// order the choices were declared in the chapter so a tie always resolves to
+// the same path, and so choice IDs a client invented are never picked. Falls
+// back to sorted keys when no question is in flight.
 func (vm *VoteManager) determineWinner(results map[string]int) string {
+	order := vm.choiceOrder
+	if len(order) == 0 {
+		order = slices.Sorted(maps.Keys(results))
+	}
+
 	maxVotes := 0
 	winner := ""
 
-	for choiceID, count := range results {
-		if count > maxVotes {
+	for _, choiceID := range order {
+		if count := results[choiceID]; count > maxVotes {
 			maxVotes = count
 			winner = choiceID
 		}
@@ -330,6 +359,7 @@ func (vm *VoteManager) ResetVoting() {
 
 	vm.votingActive = false
 	vm.currentQuestion = ""
+	vm.choiceOrder = nil
 	vm.voters = make(map[string]string)
 	// clear the history
 	vm.votes = make(map[string]map[string]int)
@@ -355,6 +385,7 @@ func (vm *VoteManager) ClearQuestionVotes(questionID string) {
 
 	vm.votingActive = false
 	vm.currentQuestion = ""
+	vm.choiceOrder = nil
 	vm.voters = make(map[string]string)
 
 	if questionID != "" {
