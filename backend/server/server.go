@@ -106,6 +106,15 @@ func (s *Server) setupRoutes() {
 	s.router.PathPrefix("/").Handler(fileServer)
 }
 
+// engine returns the current story engine. Author mode swaps the pointer on
+// save, so every read outside s.mu must go through here.
+func (s *Server) engine() *parser.StoryEngine {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.storyEngine
+}
+
 // requirePresenterAuth is a simple middleware for presenter authentication.
 // Accepts both Bearer token and Basic Auth.
 func (s *Server) requirePresenterAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -205,7 +214,9 @@ func (s *Server) effectiveVoterURL(r *http.Request) string {
 
 // handleGetStoryGraph returns every chapter as a flat array suitable for the editor canvas.
 func (s *Server) handleGetStoryGraph(w http.ResponseWriter, r *http.Request) {
-	chapters, err := s.storyEngine.AllChapters()
+	engine := s.engine()
+
+	chapters, err := engine.AllChapters()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 
@@ -239,7 +250,7 @@ func (s *Server) handleGetStoryGraph(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	if err := json.NewEncoder(w).Encode(map[string]any{
-		"start":    s.storyEngine.Story.Flow.Start,
+		"start":    engine.Story.Flow.Start,
 		"chapters": out,
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -268,7 +279,7 @@ func (s *Server) handleAuthorSaveChapter(w http.ResponseWriter, r *http.Request)
 		RawMD    string          `json:"raw_md"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil { //nolint:musttag // ignore
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 
 		return
@@ -332,10 +343,11 @@ func (s *Server) chapterFilePath(id string) (string, error) {
 		return "", fmt.Errorf("invalid chapter id %q (lowercase, digits, hyphens only)", id)
 	}
 
-	contentDir := s.storyEngine.ContentDir
+	engine := s.engine()
+	contentDir := engine.ContentDir
 
 	filename := id + ".md"
-	if node, ok := s.storyEngine.Story.Nodes[id]; ok && node.File != "" {
+	if node, ok := engine.Story.Nodes[id]; ok && node.File != "" {
 		filename = node.File
 	}
 
@@ -377,7 +389,7 @@ func buildChapterFile(meta parser.ChapterMetadata, body string) ([]byte, error) 
 // reloadStoryEngine rebuilds the engine from disk after a write so subsequent
 // reads see the new chapter set. Holds the server lock to keep readers consistent.
 func (s *Server) reloadStoryEngine() error {
-	engine, err := parser.NewStoryEngine(s.storyPath, s.storyEngine.ContentDir)
+	engine, err := parser.NewStoryEngine(s.storyPath, s.engine().ContentDir)
 	if err != nil {
 		return err
 	}
@@ -394,7 +406,7 @@ func (s *Server) handleGetChapter(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	chapterID := vars["id"]
 
-	chapter, err := s.storyEngine.GetChapter(chapterID)
+	chapter, err := s.engine().GetChapter(chapterID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 
@@ -419,9 +431,10 @@ func (s *Server) handleGetChapter(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetCurrentChapter(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	currentNode := s.currentNode
+	engine := s.storyEngine
 	s.mu.RUnlock()
 
-	chapter, err := s.storyEngine.GetChapter(currentNode)
+	chapter, err := engine.GetChapter(currentNode)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 
@@ -458,9 +471,10 @@ func (s *Server) handleStartVoting(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.RLock()
 	currentNode := s.currentNode
+	engine := s.storyEngine
 	s.mu.RUnlock()
 
-	chapter, err := s.storyEngine.GetChapter(currentNode)
+	chapter, err := engine.GetChapter(currentNode)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 
@@ -499,12 +513,22 @@ func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.history = append(s.history, s.currentNode)
+	current, err := s.storyEngine.GetChapter(s.currentNode)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 
-	var (
-		nextChapter *parser.Chapter
-		err         error
-	)
+		return
+	}
+
+	// A decision point has no linear `next`, so advancing without a choice is
+	// ambiguous. Say so plainly instead of leaking "no next chapter defined".
+	if req.ChoiceID == "" && len(current.Metadata.Choices) > 0 {
+		http.Error(w, "no choice given for decision point "+s.currentNode+"; pick a path", http.StatusBadRequest)
+
+		return
+	}
+
+	var nextChapter *parser.Chapter
 
 	if req.ChoiceID != "" {
 		nextChapter, err = s.storyEngine.GetChapterByChoice(s.currentNode, req.ChoiceID)
@@ -518,7 +542,14 @@ func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// only record the breadcrumb once the move is known to succeed
+	s.history = append(s.history, s.currentNode)
 	s.currentNode = nextChapter.Metadata.ID
+
+	// the presenter may have advanced manually mid-vote; disarm the timer so it
+	// cannot end the previous question on top of this chapter
+	s.voteManager.StopVoting()
+
 	s.voteManager.BroadcastMessage("chapter_changed", map[string]any{
 		"id":          s.currentNode,
 		"metadata":    nextChapter.Metadata,
@@ -580,9 +611,10 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRestartVoting(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	currentNode := s.currentNode
+	engine := s.storyEngine
 	s.mu.RUnlock()
 
-	chapter, err := s.storyEngine.GetChapter(currentNode)
+	chapter, err := engine.GetChapter(currentNode)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 

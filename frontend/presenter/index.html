@@ -157,6 +157,17 @@
                     <div class="chapter-content" x-html="chapterHTML"></div>
                 </div>
 
+                <!-- Error Banner -->
+                <div x-show="errorMessage" class="mb-6">
+                    <div class="pixel-box p-4 bg-red-50 dark:bg-red-950 border-red-700 dark:border-red-400 flex justify-between items-center">
+                        <span class="pixel-text-sm text-red-700 dark:text-red-400" x-text="errorMessage"></span>
+                        <button @click="errorMessage = ''"
+                                class="pixel-btn bg-neutral-800 hover:bg-neutral-700 text-white px-3 py-1">
+                            Dismiss
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Decision Point -->
                 <div x-show="isDecisionPoint && !votingActive && !winner">
                     <div class="text-center space-x-3 mb-6">
@@ -175,11 +186,11 @@
                     <div class="pixel-box p-6">
                         <h3 class="pixel-text text-center mb-4 text-neutral-700 dark:text-neutral-300">Or manually select an answer:</h3>
                         <div class="space-y-3">
-                            <template x-for="choice in choices" :key="choice.ID">
-                                <button @click="manuallySelectChoice(choice.ID)"
+                            <template x-for="choice in choices" :key="choice.id">
+                                <button @click="manuallySelectChoice(choice.id)"
                                         class="w-full pixel-choice p-4">
-                                    <div class="pixel-text mb-1 text-neutral-900 dark:text-neutral-100" x-text="choice.Label"></div>
-                                    <div class="pixel-text-sm text-neutral-600 dark:text-neutral-400" x-text="choice.Description"></div>
+                                    <div class="pixel-text mb-1 text-neutral-900 dark:text-neutral-100" x-text="choice.label"></div>
+                                    <div class="pixel-text-sm text-neutral-600 dark:text-neutral-400" x-text="choice.description"></div>
                                 </button>
                             </template>
                         </div>
@@ -203,20 +214,20 @@
 
                         <!-- Real-time Results -->
                         <div class="space-y-3">
-                            <template x-for="choice in choices" :key="choice.ID">
+                            <template x-for="choice in choices" :key="choice.id">
                                 <div class="pixel-card p-5">
                                     <div class="flex justify-between items-center mb-3">
                                         <div class="flex items-center space-x-3">
-                                            <span class="pixel-text" x-text="choice.Label"></span>
+                                            <span class="pixel-text" x-text="choice.label"></span>
                                         </div>
                                         <div class="text-right">
-                                            <div class="pixel-heading text-xl" x-text="results[choice.ID] || 0"></div>
-                                            <div class="pixel-text-sm text-neutral-500 dark:text-neutral-400" x-text="getPercentage(choice.ID) + '%'"></div>
+                                            <div class="pixel-heading text-xl" x-text="results[choice.id] || 0"></div>
+                                            <div class="pixel-text-sm text-neutral-500 dark:text-neutral-400" x-text="getPercentage(choice.id) + '%'"></div>
                                         </div>
                                     </div>
                                     <div class="pixel-result-bar">
                                         <div class="pixel-result-fill"
-                                             :style="'width: ' + getPercentage(choice.ID) + '%'"></div>
+                                             :style="'width: ' + getPercentage(choice.id) + '%'"></div>
                                     </div>
                                 </div>
                             </template>
@@ -235,23 +246,23 @@
 
                         <!-- Final Results -->
                         <div class="space-y-3 mb-8">
-                            <template x-for="choice in choices" :key="choice.ID">
-                                <div :class="choice.ID === winner ? 'bg-blue-600 dark:bg-blue-700 text-white' : ''"
+                            <template x-for="choice in choices" :key="choice.id">
+                                <div :class="choice.id === winner ? 'bg-blue-600 dark:bg-blue-700 text-white' : ''"
                                      class="pixel-card p-5">
                                     <div class="flex justify-between items-center mb-3">
                                         <div class="flex items-center space-x-3">
-                                            <span class="pixel-text" x-text="choice.Label"></span>
+                                            <span class="pixel-text" x-text="choice.label"></span>
                                         </div>
                                         <div class="text-right">
                                             <div class="pixel-heading text-xl"
-                                                 x-text="results[choice.ID] || 0"></div>
-                                            <div class="pixel-text-sm opacity-70" x-text="getPercentage(choice.ID) + '%'"></div>
+                                                 x-text="results[choice.id] || 0"></div>
+                                            <div class="pixel-text-sm opacity-70" x-text="getPercentage(choice.id) + '%'"></div>
                                         </div>
                                     </div>
                                     <div class="pixel-result-bar">
-                                        <div :class="choice.ID === winner ? 'bg-white' : ''"
+                                        <div :class="choice.id === winner ? 'bg-white' : ''"
                                              class="pixel-result-fill"
-                                             :style="'width: ' + getPercentage(choice.ID) + '%'"></div>
+                                             :style="'width: ' + getPercentage(choice.id) + '%'"></div>
                                     </div>
                                 </div>
                             </template>
@@ -337,6 +348,7 @@
                 canGoBack: false,
                 question: '',
                 darkMode: false,
+                errorMessage: '',
                 voterURL: '',
                 qrSvg: '',
                 qrSvgLarge: '',
@@ -410,12 +422,25 @@
                     }
                 },
 
+                async reportFailure(action, response) {
+                    let detail = '';
+                    try {
+                        detail = (await response.text()).trim();
+                    } catch (error) {
+                        detail = '';
+                    }
+                    this.errorMessage = detail ? `${action}: ${detail}` : `${action} (HTTP ${response.status})`;
+                    console.error(this.errorMessage);
+                    return detail;
+                },
+
                 displayChapter(chapter) {
                     this.currentChapter = chapter;
+                    this.errorMessage = '';
                     this.chapterHTML = chapter.content;
-                    this.isDecisionPoint = chapter.metadata.Type === 'decision';
-                    this.isTerminal = chapter.metadata.Terminal === true || chapter.metadata.Type === 'game-over' || chapter.metadata.Type === 'terminal';
-                    this.choices = chapter.metadata.Choices || [];
+                    this.isDecisionPoint = chapter.metadata.type === 'decision';
+                    this.isTerminal = chapter.metadata.terminal === true || chapter.metadata.type === 'game-over' || chapter.metadata.type === 'terminal';
+                    this.choices = chapter.metadata.choices || [];
                     this.votingActive = false;
                     this.winner = null;
                     this.results = {};
@@ -490,8 +515,8 @@
                         return;
                     }
 
-                    const duration = this.currentChapter.metadata.Timer || 60;
-                    const choiceIds = this.choices.map(c => c.ID);
+                    const duration = this.currentChapter.metadata.timer || 60;
+                    const choiceIds = this.choices.map(c => c.id);
 
                     try {
                         const response = await fetch('/api/start-voting', {
@@ -506,10 +531,11 @@
                         });
 
                         if (!response.ok) {
-                            console.error('Failed to start voting');
+                            await this.reportFailure('Failed to start voting', response);
                         }
                     } catch (error) {
-                        console.error('Error starting voting:', error);
+                        this.errorMessage = 'Error starting voting: ' + error.message;
+                        console.error(error);
                     }
                 },
 
@@ -563,10 +589,11 @@
                             this.displayChapter(data);
                             // canGoBack is now set by displayChapter from server response
                         } else {
-                            console.error('Failed to advance story');
+                            await this.reportFailure('Failed to advance story', response);
                         }
                     } catch (error) {
-                        console.error('Error advancing story:', error);
+                        this.errorMessage = 'Error advancing story: ' + error.message;
+                        console.error(error);
                     }
                 },
 
@@ -587,10 +614,11 @@
                             this.displayChapter(data);
                             this.canGoBack = false;
                         } else {
-                            console.error('Failed to restart story');
+                            await this.reportFailure('Failed to restart story', response);
                         }
                     } catch (error) {
-                        console.error('Error restarting story:', error);
+                        this.errorMessage = 'Error restarting story: ' + error.message;
+                        console.error(error);
                     }
                 },
 
@@ -612,11 +640,13 @@
                             this.results = {};
                             this.totalVotes = 0;
                             this.hasVoted = false;
+                            this.errorMessage = '';
                         } else {
-                            console.error('Failed to restart voting');
+                            await this.reportFailure('Failed to restart voting', response);
                         }
                     } catch (error) {
-                        console.error('Error restarting voting:', error);
+                        this.errorMessage = 'Error restarting voting: ' + error.message;
+                        console.error(error);
                     }
                 },
 
@@ -633,14 +663,14 @@
                             this.displayChapter(data);
                             // Don't automatically set canGoBack here - let the WebSocket message handle it
                         } else {
-                            const errorText = await response.text();
+                            const errorText = await this.reportFailure('Failed to go back', response);
                             if (response.status === 400 && errorText.includes('no history')) {
                                 this.canGoBack = false;
                             }
-                            console.error('Failed to go back:', errorText);
                         }
                     } catch (error) {
-                        console.error('Error going back:', error);
+                        this.errorMessage = 'Error going back: ' + error.message;
+                        console.error(error);
                     }
                 },
 
@@ -672,13 +702,13 @@
                 getWinnerLabel() {
                     if (!this.winner) return '';
                     const choice = this.choices.find(c => c.id === this.winner);
-                    return choice ? choice.Label : '';
+                    return choice ? choice.label : '';
                 },
 
                 getWinnerIcon() {
                     if (!this.winner) return '';
                     const choice = this.choices.find(c => c.id === this.winner);
-                    return choice ? (choice.Icon || '🎯') : '🎯';
+                    return choice ? (choice.icon || '🎯') : '🎯';
                 }
             }
         }

@@ -90,8 +90,9 @@ type: game-over
 		t.Fatalf("failed to create server: %v", err)
 	}
 
-	// Start vote manager
-	go server.voteManager.Run()
+	// NewServer already starts the vote manager. Starting a second one here gave
+	// two hubs draining the same broadcast channel, which raced on WriteJSON for
+	// a single connection (gorilla allows only one concurrent writer).
 
 	return server, tmpDir
 }
@@ -321,7 +322,7 @@ func TestHandleAuthorSaveChapter(t *testing.T) {
 			"type":"decision",
 			"timer":30,
 			"question":"Updated question",
-			"choices":[{"ID":"opt-a","Label":"A","Next":"path-a"},{"ID":"opt-b","Label":"B","Next":"path-b"}],
+			"choices":[{"id":"opt-a","label":"A","next":"path-a"},{"id":"opt-b","label":"B","next":"path-b"}],
 			"raw_md":"# Updated"
 		}`
 		req := httptest.NewRequest("POST", "/api/author/chapter", strings.NewReader(body))
@@ -829,5 +830,87 @@ func TestInvalidJSONRequests(t *testing.T) {
 				t.Errorf("status = %d, want %d", w.Code, tt.wantCode)
 			}
 		})
+	}
+}
+
+func TestHandleAdvance_FailureLeavesHistoryUntouched(t *testing.T) {
+	server, tmpDir := setupTestServer(t)
+	defer os.RemoveAll(tmpDir)
+
+	tests := []struct {
+		name     string
+		choiceID string
+		wantBody string
+	}{
+		{
+			name:     "unknown choice",
+			choiceID: "no-such-choice",
+			wantBody: "choice not found",
+		},
+		{
+			name:     "no choice on a decision point",
+			choiceID: "",
+			wantBody: "no choice given for decision point",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server.currentNode = "choice1"
+			server.history = []string{}
+
+			body, _ := json.Marshal(map[string]any{"choice_id": tt.choiceID})
+			req := httptest.NewRequest("POST", "/api/advance", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			server.handleAdvance(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+			}
+
+			if !strings.Contains(w.Body.String(), tt.wantBody) {
+				t.Errorf("body = %q, want it to contain %q", w.Body.String(), tt.wantBody)
+			}
+
+			if len(server.history) != 0 {
+				t.Errorf("history length = %d, want 0; a failed advance must not leave a breadcrumb", len(server.history))
+			}
+
+			if server.currentNode != "choice1" {
+				t.Errorf("currentNode = %q, want it unchanged", server.currentNode)
+			}
+		})
+	}
+}
+
+func TestHandleAdvance_DisarmsPendingVote(t *testing.T) {
+	server, tmpDir := setupTestServer(t)
+	defer os.RemoveAll(tmpDir)
+
+	server.currentNode = "choice1"
+	server.history = []string{}
+
+	// a vote long enough that only an explicit stop can prevent it firing later
+	server.voteManager.StartVotingWithChoices("choice1", []string{"opt-a", "opt-b"}, nil, "", time.Hour, nil)
+
+	if !server.voteManager.IsVotingActive() {
+		t.Fatal("voting should be active before the manual advance")
+	}
+
+	body, _ := json.Marshal(map[string]any{"choice_id": "opt-a"})
+	req := httptest.NewRequest("POST", "/api/advance", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.handleAdvance(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	if server.voteManager.IsVotingActive() {
+		t.Error("advancing must disarm the pending vote so it cannot end on top of the next chapter")
 	}
 }

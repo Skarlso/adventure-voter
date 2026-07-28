@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -33,10 +34,14 @@ type StoryNode struct {
 }
 
 // StoryEngine manages the adventure state and navigation.
+// Story and ContentDir are immutable after construction; the chapter cache is
+// written lazily from concurrent HTTP handlers and needs the mutex.
 type StoryEngine struct {
 	Story      *Story
 	ContentDir string
-	chapters   map[string]*Chapter // Cache parsed chapters
+
+	mu       sync.RWMutex
+	chapters map[string]*Chapter // Cache parsed chapters
 }
 
 // NewStoryEngine creates a new story engine.
@@ -109,8 +114,12 @@ func buildStoryFromChapters(contentDir, startNode string) (*Story, error) {
 
 // GetChapter retrieves and parses a chapter by node ID.
 func (se *StoryEngine) GetChapter(nodeID string) (*Chapter, error) {
-	if chapter, ok := se.chapters[nodeID]; ok {
-		return chapter, nil
+	se.mu.RLock()
+	cached, ok := se.chapters[nodeID]
+	se.mu.RUnlock()
+
+	if ok {
+		return cached, nil
 	}
 
 	node, ok := se.Story.Nodes[nodeID]
@@ -137,7 +146,9 @@ func (se *StoryEngine) GetChapter(nodeID string) (*Chapter, error) {
 		chapter.Metadata.Next = node.Next
 	}
 
+	se.mu.Lock()
 	se.chapters[nodeID] = chapter
+	se.mu.Unlock()
 
 	return chapter, nil
 }

@@ -16,23 +16,23 @@ import (
 
 // ChapterMetadata represents the YAML frontmatter in a markdown file.
 type ChapterMetadata struct {
-	ID       string   `yaml:"id"`
-	Type     string   `yaml:"type"` // story, decision, game-over, terminal
-	Timer    int      `yaml:"timer,omitempty"`
-	Terminal bool     `yaml:"terminal,omitempty"`
-	Next     string   `yaml:"next,omitempty"`
-	Question string   `yaml:"question,omitempty"`
-	Choices  []Choice `yaml:"choices,omitempty"`
+	ID       string   `json:"id"                 yaml:"id"`
+	Type     string   `json:"type"               yaml:"type"` // story, decision, game-over, terminal
+	Timer    int      `json:"timer,omitempty"    yaml:"timer,omitempty"`
+	Terminal bool     `json:"terminal,omitempty" yaml:"terminal,omitempty"`
+	Next     string   `json:"next,omitempty"     yaml:"next,omitempty"`
+	Question string   `json:"question,omitempty" yaml:"question,omitempty"`
+	Choices  []Choice `json:"choices,omitempty"  yaml:"choices,omitempty"`
 }
 
 // Choice represents a voting option.
 type Choice struct {
-	ID          string `yaml:"id"`
-	Label       string `yaml:"label"`
-	Description string `yaml:"description"`
-	Next        string `yaml:"next"`
-	Risk        string `yaml:"risk,omitempty"` // low, medium, high
-	Icon        string `yaml:"icon,omitempty"`
+	ID          string `json:"id"             yaml:"id"`
+	Label       string `json:"label"          yaml:"label"`
+	Description string `json:"description"    yaml:"description"`
+	Next        string `json:"next"           yaml:"next"`
+	Risk        string `json:"risk,omitempty" yaml:"risk,omitempty"` // low, medium, high
+	Icon        string `json:"icon,omitempty" yaml:"icon,omitempty"`
 }
 
 // Chapter represents a parsed chapter with metadata and content.

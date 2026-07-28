@@ -72,33 +72,33 @@
 
             <!-- Choices -->
             <div class="space-y-4">
-                <template x-for="choice in choices" :key="choice.ID">
-                    <button @click="vote(choice.ID)"
-                            :disabled="hasVoted && selectedChoice !== choice.ID"
+                <template x-for="choice in choices" :key="choice.id">
+                    <button @click="vote(choice.id)"
+                            :disabled="hasVoted && selectedChoice !== choice.id"
                             :class="{
-                                'selected': selectedChoice === choice.ID,
-                                'opacity-40 cursor-not-allowed': hasVoted && selectedChoice !== choice.ID
+                                'selected': selectedChoice === choice.id,
+                                'opacity-40 cursor-not-allowed': hasVoted && selectedChoice !== choice.id
                             }"
                             class="w-full pixel-choice p-4">
                         <div class="flex items-center justify-between">
                             <div class="text-left flex-1">
-                                <div class="pixel-text mb-1" x-text="choice.Label"></div>
-                                <div class="pixel-text-sm opacity-70" x-text="choice.Description"></div>
+                                <div class="pixel-text mb-1" x-text="choice.label"></div>
+                                <div class="pixel-text-sm opacity-70" x-text="choice.description"></div>
                             </div>
                             <div class="ml-4">
-                                <div x-show="selectedChoice === choice.ID" class="text-2xl">✓</div>
+                                <div x-show="selectedChoice === choice.id" class="text-2xl">✓</div>
                             </div>
                         </div>
 
                         <!-- Vote Count Bar -->
                         <div x-show="showResults" class="mt-3">
                             <div class="flex justify-between pixel-text-sm mb-1 opacity-70">
-                                <span x-text="results[choice.ID] || 0">0</span>
-                                <span x-text="((results[choice.ID] || 0) / totalVotes * 100).toFixed(0) + '%'">0%</span>
+                                <span x-text="results[choice.id] || 0">0</span>
+                                <span x-text="((results[choice.id] || 0) / totalVotes * 100).toFixed(0) + '%'">0%</span>
                             </div>
                             <div class="pixel-result-bar">
                                 <div class="pixel-result-fill"
-                                     :style="'width: ' + ((results[choice.ID] || 0) / totalVotes * 100) + '%'"></div>
+                                     :style="'width: ' + ((results[choice.id] || 0) / totalVotes * 100) + '%'"></div>
                             </div>
                         </div>
                     </button>
@@ -121,16 +121,16 @@
 
                 <!-- Results Bars -->
                 <div class="space-y-3 mb-6">
-                    <template x-for="choice in choices" :key="choice.ID">
+                    <template x-for="choice in choices" :key="choice.id">
                         <div class="text-left">
                             <div class="flex justify-between pixel-text-sm text-neutral-700 dark:text-neutral-300 mb-1">
-                                <span x-text="choice.Label"></span>
-                                <span x-text="((results[choice.ID] || 0) / totalVotes * 100).toFixed(0) + '%'">0%</span>
+                                <span x-text="choice.label"></span>
+                                <span x-text="((results[choice.id] || 0) / totalVotes * 100).toFixed(0) + '%'">0%</span>
                             </div>
                             <div class="pixel-result-bar">
-                                <div :class="choice.ID === winner ? 'bg-blue-600 dark:bg-blue-500' : 'bg-neutral-400 dark:bg-neutral-600'"
+                                <div :class="choice.id === winner ? 'bg-blue-600 dark:bg-blue-500' : 'bg-neutral-400 dark:bg-neutral-600'"
                                      class="h-full transition-all duration-1000"
-                                     :style="'width: ' + ((results[choice.ID] || 0) / totalVotes * 100) + '%'"></div>
+                                     :style="'width: ' + ((results[choice.id] || 0) / totalVotes * 100) + '%'"></div>
                             </div>
                         </div>
                     </template>
@@ -315,6 +315,19 @@
                     this.hasVoted = false;
                     this.winner = null;
                     this.showResults = false;
+                    // the presenter may have moved on mid-vote; tear the ballot down
+                    // rather than leaving a live-looking vote UI for a dead question
+                    this.votingActive = false;
+                    this.choices = [];
+                    this.question = '';
+                    this.results = {};
+                    this.totalVotes = 0;
+                    this.timeRemaining = 0;
+
+                    if (this.timerInterval) {
+                        clearInterval(this.timerInterval);
+                        this.timerInterval = null;
+                    }
                 },
 
                 vote(choiceId) {
@@ -337,13 +350,13 @@
                 getWinnerLabel() {
                     if (!this.winner) return '';
                     const choice = this.choices.find(c => c.id === this.winner);
-                    return choice ? choice.Label : '';
+                    return choice ? choice.label : '';
                 },
 
                 getWinnerIcon() {
                     if (!this.winner) return '';
                     const choice = this.choices.find(c => c.id === this.winner);
-                    return choice ? (choice.Icon || '🎯') : '🎯';
+                    return choice ? (choice.icon || '🎯') : '🎯';
                 }
             }
         }
