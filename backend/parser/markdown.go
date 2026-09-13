@@ -4,13 +4,19 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/renderer/html"
+	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 	"gopkg.in/yaml.v3"
 )
 
@@ -40,6 +46,52 @@ type Chapter struct {
 	Metadata ChapterMetadata
 	Content  string
 	RawMD    string
+}
+
+// MediaURLPrefix is the route the server exposes the chapter directory under.
+const MediaURLPrefix = "/media/"
+
+// mediaPathTransformer rewrites chapter-relative image paths to the /media/
+// route. Images are stores next to the chapter files.
+type mediaPathTransformer struct{}
+
+// Transform walks the node and rewrites image paths to their actually served location.
+func (mediaPathTransformer) Transform(doc *ast.Document, _ text.Reader, _ parser.Context) {
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		image, ok := n.(*ast.Image)
+		if !ok || !entering {
+			return ast.WalkContinue, nil
+		}
+
+		if dest, rewrite := mediaPath(string(image.Destination)); rewrite {
+			image.Destination = []byte(dest)
+		}
+
+		return ast.WalkContinue, nil
+	})
+}
+
+// mediaPath prefixes a chapter-relative image path with MediaURLPrefix. It
+// leaves external URLs, data URIs, already-absolute paths and anything
+// reaching outside the chapter directory, unmodified.
+func mediaPath(dest string) (string, bool) {
+	if dest == "" || strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "#") {
+		return "", false
+	}
+
+	// if it has a scheme, it's an external reference, skip it.
+	if parsed, err := url.Parse(dest); err != nil || parsed.Scheme != "" {
+		return "", false
+	}
+
+	trimmed := strings.TrimPrefix(dest, "./")
+
+	// clean the path
+	if cleaned := path.Clean(trimmed); cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", false
+	}
+
+	return MediaURLPrefix + trimmed, true
 }
 
 // ParseMarkdownFile reads and parses a markdown file with YAML frontmatter.
@@ -76,6 +128,7 @@ func ParseMarkdown(content []byte) (*Chapter, error) {
 		),
 		goldmark.WithParserOptions(
 			parser.WithAutoHeadingID(),
+			parser.WithASTTransformers(util.Prioritized(mediaPathTransformer{}, 100)),
 		),
 		goldmark.WithRendererOptions(
 			html.WithHardWraps(),
@@ -95,12 +148,11 @@ func ParseMarkdown(content []byte) (*Chapter, error) {
 	}, nil
 }
 
-// splitFrontmatter splits YAML frontmatter from markdown content
+// splitFrontmatter splits YAML frontmatter from Markdown content
 // Expected format:
 // ---
 // key: value
-// ---
-// # Markdown content.
+// ---.
 func splitFrontmatter(content []byte) (frontmatter []byte, markdown []byte, err error) {
 	if !bytes.HasPrefix(content, []byte("---\n")) && !bytes.HasPrefix(content, []byte("---\r\n")) {
 		return nil, content, nil

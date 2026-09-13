@@ -64,6 +64,7 @@ func main() {
 	log.Printf("Adventure server starting...")
 	log.Printf("Content: %s", absContentDir)
 	log.Printf("Story: %s", absStoryFile)
+	log.Printf("Images: %s served at /media/", absContentDir)
 	log.Printf("Static: embedded")
 	log.Printf("Server: http://localhost%s", *addr)
 	log.Printf("Voter: http://localhost%s/voter", *addr)

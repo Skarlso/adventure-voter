@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -22,6 +23,22 @@ import (
 
 var chapterIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
+// allowedMediaExtensions gates what /media/ will serve. This is load-bearing:
+// /media/ is rooted at the chapter directory, so the allowlist is what keeps
+// the route from handing out the .md sources sitting next to the images. It
+// also rules out directory listings, since a directory has no allowed suffix.
+var allowedMediaExtensions = map[string]struct{}{
+	".apng": {},
+	".avif": {},
+	".gif":  {},
+	".ico":  {},
+	".jpeg": {},
+	".jpg":  {},
+	".png":  {},
+	".svg":  {},
+	".webp": {},
+}
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return true // allow all origins since this is designed to either run with a reverse proxy or locally
@@ -35,6 +52,7 @@ type Server struct {
 	voteManager     *VoteManager
 	storyEngine     *parser.StoryEngine
 	storyPath       string
+	mediaHandler    http.Handler // nil when no media directory is configured; immutable after construction
 	currentNode     string
 	history         []string // breadcrumb of visited chapter IDs
 	staticFS        fs.FS
@@ -58,11 +76,19 @@ func NewServer(storyPath, contentDir string, staticFS fs.FS, presenterSecret, vo
 		}
 	}
 
+	// images live beside the chapters they belong to, so /media/ is rooted at
+	// the chapter directory itself
+	var mediaHandler http.Handler
+	if contentDir != "" {
+		mediaHandler = http.StripPrefix(parser.MediaURLPrefix, http.FileServer(http.Dir(contentDir)))
+	}
+
 	s := &Server{
 		router:          mux.NewRouter(),
 		voteManager:     NewVoteManager(),
 		storyEngine:     engine,
 		storyPath:       storyPath,
+		mediaHandler:    mediaHandler,
 		currentNode:     engine.Story.Flow.Start,
 		history:         []string{},
 		staticFS:        staticFS,
@@ -99,6 +125,9 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/go-back", s.requirePresenterAuth(s.handleGoBack)).Methods("POST")
 
 	s.router.HandleFunc("/ws", s.handleWebSocket)
+
+	// chapter images, before the catch-all static handler
+	s.router.PathPrefix(parser.MediaURLPrefix).HandlerFunc(s.handleMedia).Methods("GET", "HEAD")
 
 	fileServer := http.FileServer(http.FS(s.staticFS))
 	s.router.PathPrefix("/presenter").Handler(s.requirePresenterAuthMiddleware(fileServer))
@@ -210,6 +239,32 @@ func (s *Server) effectiveVoterURL(r *http.Request) string {
 	}
 
 	return fmt.Sprintf("%s://%s/voter/", scheme, host)
+}
+
+// handleMedia serves images from the chapter directory. The parser rewrites
+// ![diagram](etcd.png) in a chapter to /media/etcd.png, so authors keep their
+// images next to the markdown that uses them. Unauthenticated, matching the
+// chapter endpoints the markup comes from.
+//
+// http.Dir already refuses path elements containing "..", so the extension
+// allowlist is the only extra guard needed.
+func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
+	if s.mediaHandler == nil {
+		http.NotFound(w, r)
+
+		return
+	}
+
+	if _, ok := allowedMediaExtensions[strings.ToLower(path.Ext(r.URL.Path))]; !ok {
+		http.NotFound(w, r)
+
+		return
+	}
+
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+
+	s.mediaHandler.ServeHTTP(w, r)
 }
 
 // handleGetStoryGraph returns every chapter as a flat array suitable for the editor canvas.
