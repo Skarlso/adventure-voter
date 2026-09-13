@@ -117,10 +117,11 @@ Find your binary, download and extract it. From there, simply create a structure
     │   ├── 09a-network-success.md
     │   ├── 09b-network-mess.md
     │   ├── 09c-network-broken.md
-    │   └── 10-final-success.md
+    │   ├── 10-final-success.md
+    │   └── etcd-topology.png
     └── story.yaml
 
-3 directories, 20 files
+3 directories, 21 files
 ```
 
 And run the binary like this:
@@ -187,6 +188,25 @@ start: intro
 
 And go from there by building up the chain through `next` sections in the markdown files.
 
+### Images
+
+Embed images into the presentation with the following syntax:
+
+```markdown
+![the etcd cluster](etcd-topology.png)
+```
+
+These are rendered as follows: centered, framed, on their own line, and capped at 55% of the
+screen height.
+
+The presenter theme sets `image-rendering: pixelated` globally, which is lovely for the 8-bit
+chrome and terrible for screenshots, so content images render smoothly by default. For actual
+pixel art, end the alt text with `(pixel)`:
+
+```markdown
+![a goblin (pixel)](goblin.png)
+```
+
 ## During Your Presentation
 
 Open the presenter view on your screen and start sharing the voter URL. As you navigate through your story,
@@ -246,7 +266,7 @@ The server accepts several flags:
 
 Configuration flags:
 - `-addr`: Server address (default: `:8080`)
-- `-content`: Path to chapter markdown files (default: `content/chapters`)
+- `-content`: Path to chapter markdown files, and the images beside them (default: `content/chapters`)
 - `-story`: Path to story.yaml (default: `content/story.yaml`)
 - `-presenter-secret`: Authentication password (optional; disables auth if empty)
 

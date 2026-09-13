@@ -301,3 +301,92 @@ func TestMarkdownFeatures(t *testing.T) {
 		})
 	}
 }
+
+func TestParseMarkdown_ImagePaths(t *testing.T) {
+	tests := []struct {
+		name     string
+		markdown string
+		want     string
+	}{
+		{
+			name:     "sibling image is rewritten to the media route",
+			markdown: "![diagram](etcd.png)",
+			want:     `src="/media/etcd.png"`,
+		},
+		{
+			name:     "explicit dot-slash is normalised",
+			markdown: "![diagram](./etcd.png)",
+			want:     `src="/media/etcd.png"`,
+		},
+		{
+			name:     "subdirectory is preserved",
+			markdown: "![diagram](diagrams/etcd.png)",
+			want:     `src="/media/diagrams/etcd.png"`,
+		},
+		{
+			name:     "query string survives the rewrite",
+			markdown: "![diagram](etcd.png?v=2)",
+			want:     `src="/media/etcd.png?v=2"`,
+		},
+		{
+			name:     "already absolute path is left alone",
+			markdown: "![diagram](/media/etcd.png)",
+			want:     `src="/media/etcd.png"`,
+		},
+		{
+			name:     "external url is left alone",
+			markdown: "![gopher](https://example.com/gopher.png)",
+			want:     `src="https://example.com/gopher.png"`,
+		},
+		{
+			name:     "data uri is left alone",
+			markdown: "![dot](data:image/gif;base64,R0lGODlhAQABAAAAACw=)",
+			want:     `src="data:image/gif;base64,R0lGODlhAQABAAAAACw="`,
+		},
+		{
+			name:     "path escaping the chapter dir is left visibly broken",
+			markdown: "![oops](../outside.png)",
+			want:     `src="../outside.png"`,
+		},
+		{
+			name:     "links are not touched",
+			markdown: "[notes](notes.md)",
+			want:     `href="notes.md"`,
+		},
+		{
+			name:     "alt text is preserved",
+			markdown: "![a goblin (pixel)](goblin.png)",
+			want:     `alt="a goblin (pixel)"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chapter, err := ParseMarkdown([]byte(tt.markdown))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if !strings.Contains(chapter.Content, tt.want) {
+				t.Errorf("expected %q in %q", tt.want, chapter.Content)
+			}
+		})
+	}
+}
+
+func TestParseMarkdown_ImagePathsKeepRawMD(t *testing.T) {
+	chapter, err := ParseMarkdown([]byte("![diagram](etcd.png)"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// the editor round-trips RawMD back to disk, so the rewrite must not leak
+	// into the source the author wrote
+	if !strings.Contains(chapter.RawMD, "(etcd.png)") {
+		t.Errorf("expected raw markdown to keep the relative path, got %q", chapter.RawMD)
+	}
+
+	if strings.Contains(chapter.RawMD, "/media/") {
+		t.Errorf("rewrite leaked into raw markdown: %q", chapter.RawMD)
+	}
+}

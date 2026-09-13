@@ -167,6 +167,7 @@
         .preview-pane p { margin: 0.5rem 0; }
         .preview-pane code { background: #f3f4f6; padding: 0.1rem 0.3rem; font-family: 'Courier New', monospace; }
         .preview-pane pre { background: #f3f4f6; padding: 0.5rem; overflow-x: auto; }
+        .preview-pane img { display: block; max-width: 100%; max-height: 140px; width: auto; height: auto; margin: 0.5rem auto; border: 2px solid #000; image-rendering: auto; }
         .panel-footer {
             border-top: 2px solid #000;
             padding: 12px 16px;
@@ -439,10 +440,28 @@
                     if (!this.selected) { this.previewHTML = ''; return; }
                     if (typeof marked === 'undefined') { this.previewHTML = '<em>marked not loaded</em>'; return; }
                     try {
-                        this.previewHTML = marked.parse(this.selected.raw_md || '');
+                        this.previewHTML = this.rewriteImagePaths(marked.parse(this.selected.raw_md || ''));
                     } catch (error) {
                         this.previewHTML = '<em>preview error: ' + this.escape(error.message) + '</em>';
                     }
+                },
+
+                // rewrite url paths to media.
+                rewriteImagePaths(html) {
+                    const doc = new DOMParser().parseFromString(html, 'text/html');
+
+                    doc.querySelectorAll('img').forEach(img => {
+                        const src = img.getAttribute('src') || '';
+                        const external = /^[a-z][a-z0-9+.-]*:/i.test(src);
+                        if (!src || external || src.startsWith('/') || src.startsWith('#')) return;
+
+                        const relative = src.replace(/^\.\//, '');
+                        if (relative.startsWith('../')) return;
+
+                        img.setAttribute('src', '/media/' + relative);
+                    });
+
+                    return doc.body.innerHTML;
                 },
 
                 addChoice() {
