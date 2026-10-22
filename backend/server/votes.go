@@ -8,21 +8,22 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 	"github.com/skarlso/kube_adventures/voting/backend/parser"
 )
 
 // VoteManager handles vote aggregation and broadcasting.
+//
+// Lock order is mu before clientsMu. State changes broadcast while holding mu,
+// so a client registered under mu can never miss or double-see a message.
 type VoteManager struct {
 	mu              sync.RWMutex
 	currentQuestion string
 	choiceOrder     []string                  // declaration order of the current question's choices
 	votes           map[string]map[string]int // questionID -> choiceID -> count
 	voters          map[string]string         // voterID -> choiceID (for current question)
-	clients         map[*websocket.Conn]bool
-	broadcast       chan *Message
-	register        chan *websocket.Conn
-	unregister      chan *websocket.Conn
+	clientsMu       sync.Mutex
+	clients         map[*client]struct{}
 	timer           *time.Timer
 	timerDuration   time.Duration
 	votingActive    bool
@@ -38,54 +39,25 @@ type Message struct {
 // NewVoteManager creates a new vote manager.
 func NewVoteManager() *VoteManager {
 	return &VoteManager{
-		votes:      make(map[string]map[string]int),
-		voters:     make(map[string]string),
-		clients:    make(map[*websocket.Conn]bool),
-		broadcast:  make(chan *Message, 256),
-		register:   make(chan *websocket.Conn),
-		unregister: make(chan *websocket.Conn),
+		votes:   make(map[string]map[string]int),
+		voters:  make(map[string]string),
+		clients: make(map[*client]struct{}),
 	}
 }
 
-// Run starts the vote manager.
-func (vm *VoteManager) Run() {
-	for {
+// broadcast queues a message for every client without blocking. A client whose
+// queue is full is dropped instead of stalling everyone else; it reconnects.
+func (vm *VoteManager) broadcast(message *Message) {
+	vm.clientsMu.Lock()
+	defer vm.clientsMu.Unlock()
+
+	for c := range vm.clients {
 		select {
-		case client := <-vm.register:
-			vm.mu.Lock()
-			vm.clients[client] = true
-			vm.mu.Unlock()
-
-			vm.sendState(client)
-
-		case client := <-vm.unregister:
-			vm.mu.Lock()
-
-			if _, ok := vm.clients[client]; ok {
-				delete(vm.clients, client)
-				_ = client.Close()
-			}
-
-			vm.mu.Unlock()
-
-		case message := <-vm.broadcast:
-			vm.mu.RLock()
-
-			clients := make([]*websocket.Conn, 0, len(vm.clients))
-			for client := range vm.clients {
-				clients = append(clients, client)
-			}
-
-			vm.mu.RUnlock()
-
-			for _, client := range clients {
-				err := client.WriteJSON(message)
-				if err != nil {
-					log.Printf("Error broadcasting to client: %v", err)
-
-					vm.unregister <- client
-				}
-			}
+		case c.send <- message:
+		default:
+			log.Printf("Dropping websocket client: send queue full")
+			delete(vm.clients, c)
+			close(c.send)
 		}
 	}
 }
@@ -136,10 +108,10 @@ func (vm *VoteManager) StartVotingWithChoices(questionID string, choiceIDs []str
 		payload["choices"] = choiceIDs
 	}
 
-	vm.broadcast <- &Message{
+	vm.broadcast(&Message{
 		Type:    "voting_started",
 		Payload: payload,
-	}
+	})
 }
 
 // SubmitVote records a vote from a user.
@@ -187,14 +159,14 @@ func (vm *VoteManager) EndVoting() {
 	results := vm.votes[vm.currentQuestion]
 	winner := vm.determineWinner(results)
 
-	vm.broadcast <- &Message{
+	vm.broadcast(&Message{
 		Type: "voting_ended",
 		Payload: map[string]any{
 			"question_id": vm.currentQuestion,
 			"results":     results,
 			"winner":      winner,
 		},
-	}
+	})
 
 	if vm.onVoteComplete != nil {
 		go vm.onVoteComplete(results, winner)
@@ -250,39 +222,33 @@ func (vm *VoteManager) broadcastResults() {
 		maps.Copy(results, vm.votes[vm.currentQuestion])
 	}
 
-	vm.broadcast <- &Message{
+	vm.broadcast(&Message{
 		Type: "vote_update",
 		Payload: map[string]any{
 			"question_id": vm.currentQuestion,
 			"results":     results,
 			"total":       len(vm.voters),
 		},
-	}
+	})
 }
 
-// sendState sends the current voting state to a specific client.
-func (vm *VoteManager) sendState(client *websocket.Conn) {
-	vm.mu.RLock()
-	defer vm.mu.RUnlock()
-
+// stateMessage snapshots the voting state for a newly connected client.
+// Callers must hold vm.mu.
+func (vm *VoteManager) stateMessage() *Message {
 	state := map[string]any{
 		"voting_active": vm.votingActive,
 		"question_id":   vm.currentQuestion,
 	}
 
+	// cloned because the writer serializes it later, outside the lock
 	if vm.votingActive && vm.votes[vm.currentQuestion] != nil {
-		state["results"] = vm.votes[vm.currentQuestion]
+		state["results"] = maps.Clone(vm.votes[vm.currentQuestion])
 		state["total"] = len(vm.voters)
 	}
 
-	message := &Message{
+	return &Message{
 		Type:    "state",
 		Payload: state,
-	}
-
-	err := client.WriteJSON(message)
-	if err != nil {
-		log.Printf("Error sending state to client: %v", err)
 	}
 }
 
@@ -300,22 +266,41 @@ func (vm *VoteManager) GetResults(questionID string) map[string]int {
 	return results
 }
 
-// RegisterClient adds a WebSocket client.
-func (vm *VoteManager) RegisterClient(conn *websocket.Conn) {
-	vm.register <- conn
+// RegisterClient adds a WebSocket client and queues the current state for it.
+func (vm *VoteManager) RegisterClient(conn *websocket.Conn) *client {
+	c := newClient(conn)
+
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+
+	vm.clientsMu.Lock()
+	defer vm.clientsMu.Unlock()
+
+	c.send <- vm.stateMessage()
+
+	vm.clients[c] = struct{}{}
+
+	return c
 }
 
-// UnregisterClient removes a WebSocket client.
-func (vm *VoteManager) UnregisterClient(conn *websocket.Conn) {
-	vm.unregister <- conn
+// UnregisterClient removes a WebSocket client. Safe to call after the client
+// was already dropped by broadcast.
+func (vm *VoteManager) UnregisterClient(c *client) {
+	vm.clientsMu.Lock()
+	defer vm.clientsMu.Unlock()
+
+	if _, ok := vm.clients[c]; ok {
+		delete(vm.clients, c)
+		close(c.send)
+	}
 }
 
 // BroadcastMessage sends a custom message to all clients.
 func (vm *VoteManager) BroadcastMessage(msgType string, payload map[string]any) {
-	vm.broadcast <- &Message{
+	vm.broadcast(&Message{
 		Type:    msgType,
 		Payload: payload,
-	}
+	})
 }
 
 // IsVotingActive returns whether voting is currently active.
@@ -365,12 +350,12 @@ func (vm *VoteManager) ResetVoting() {
 	vm.votes = make(map[string]map[string]int)
 	vm.onVoteComplete = nil
 
-	vm.broadcast <- &Message{
+	vm.broadcast(&Message{
 		Type: "voting_reset",
 		Payload: map[string]any{
 			"status": "reset",
 		},
-	}
+	})
 }
 
 // ClearQuestionVotes clears votes for a specific question only.
@@ -394,10 +379,10 @@ func (vm *VoteManager) ClearQuestionVotes(questionID string) {
 
 	vm.onVoteComplete = nil
 
-	vm.broadcast <- &Message{
+	vm.broadcast(&Message{
 		Type: "voting_reset",
 		Payload: map[string]any{
 			"status": "reset",
 		},
-	}
+	})
 }

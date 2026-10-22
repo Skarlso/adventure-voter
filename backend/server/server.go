@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -15,8 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gorilla/mux"
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 	"github.com/skarlso/kube_adventures/voting/backend/parser"
 	"gopkg.in/yaml.v3"
 )
@@ -39,16 +39,10 @@ var allowedMediaExtensions = map[string]struct{}{
 	".webp": {},
 }
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true // allow all origins since this is designed to either run with a reverse proxy or locally
-	},
-}
-
 // Server manages the HTTP and WebSocket server.
 type Server struct {
 	mu              sync.RWMutex
-	router          *mux.Router
+	router          *http.ServeMux
 	voteManager     *VoteManager
 	storyEngine     *parser.StoryEngine
 	storyPath       string
@@ -59,6 +53,7 @@ type Server struct {
 	presenterSecret string
 	voterURL        string
 	authorMode      bool
+	pingInterval    time.Duration
 }
 
 // NewServer creates a new server instance with embedded filesystem.
@@ -84,7 +79,7 @@ func NewServer(storyPath, contentDir string, staticFS fs.FS, presenterSecret, vo
 	}
 
 	s := &Server{
-		router:          mux.NewRouter(),
+		router:          http.NewServeMux(),
 		voteManager:     NewVoteManager(),
 		storyEngine:     engine,
 		storyPath:       storyPath,
@@ -95,44 +90,43 @@ func NewServer(storyPath, contentDir string, staticFS fs.FS, presenterSecret, vo
 		presenterSecret: presenterSecret,
 		voterURL:        voterURL,
 		authorMode:      authorMode,
+		pingInterval:    pingInterval,
 	}
 
 	s.setupRoutes()
-
-	go s.voteManager.Run()
 
 	return s, nil
 }
 
 func (s *Server) setupRoutes() {
-	api := s.router.PathPrefix("/api").Subrouter()
+	r := s.router
 
 	// no auth
-	api.HandleFunc("/config", s.handleGetConfig).Methods("GET")
-	api.HandleFunc("/chapter/current", s.handleGetCurrentChapter).Methods("GET")
-	api.HandleFunc("/chapter/{id}", s.handleGetChapter).Methods("GET")
-	api.HandleFunc("/results/{questionId}", s.handleGetResults).Methods("GET")
+	r.HandleFunc("GET /api/config", s.handleGetConfig)
+	r.HandleFunc("GET /api/chapter/current", s.handleGetCurrentChapter)
+	r.HandleFunc("GET /api/chapter/{id}", s.handleGetChapter)
+	r.HandleFunc("GET /api/results/{questionId}", s.handleGetResults)
 
 	// editor (auth-gated)
-	api.HandleFunc("/story/graph", s.requirePresenterAuth(s.handleGetStoryGraph)).Methods("GET")
-	api.HandleFunc("/author/chapter", s.requirePresenterAuth(s.handleAuthorSaveChapter)).Methods("POST")
+	r.HandleFunc("GET /api/story/graph", s.requirePresenterAuth(s.handleGetStoryGraph))
+	r.HandleFunc("POST /api/author/chapter", s.requirePresenterAuth(s.handleAuthorSaveChapter))
 
 	// with auth
-	api.HandleFunc("/start-voting", s.requirePresenterAuth(s.handleStartVoting)).Methods("POST")
-	api.HandleFunc("/advance", s.requirePresenterAuth(s.handleAdvance)).Methods("POST")
-	api.HandleFunc("/restart", s.requirePresenterAuth(s.handleRestart)).Methods("POST")
-	api.HandleFunc("/restart-voting", s.requirePresenterAuth(s.handleRestartVoting)).Methods("POST")
-	api.HandleFunc("/go-back", s.requirePresenterAuth(s.handleGoBack)).Methods("POST")
+	r.HandleFunc("POST /api/start-voting", s.requirePresenterAuth(s.handleStartVoting))
+	r.HandleFunc("POST /api/advance", s.requirePresenterAuth(s.handleAdvance))
+	r.HandleFunc("POST /api/restart", s.requirePresenterAuth(s.handleRestart))
+	r.HandleFunc("POST /api/restart-voting", s.requirePresenterAuth(s.handleRestartVoting))
+	r.HandleFunc("POST /api/go-back", s.requirePresenterAuth(s.handleGoBack))
 
-	s.router.HandleFunc("/ws", s.handleWebSocket)
+	r.HandleFunc("/ws", s.handleWebSocket)
 
-	// chapter images, before the catch-all static handler
-	s.router.PathPrefix(parser.MediaURLPrefix).HandlerFunc(s.handleMedia).Methods("GET", "HEAD")
+	// chapter images; a GET pattern also matches HEAD
+	r.HandleFunc("GET "+parser.MediaURLPrefix, s.handleMedia)
 
 	fileServer := http.FileServer(http.FS(s.staticFS))
-	s.router.PathPrefix("/presenter").Handler(s.requirePresenterAuthMiddleware(fileServer))
-	s.router.PathPrefix("/editor").Handler(s.requirePresenterAuthMiddleware(fileServer))
-	s.router.PathPrefix("/").Handler(fileServer)
+	r.Handle("/presenter/", s.requirePresenterAuthMiddleware(fileServer))
+	r.Handle("/editor/", s.requirePresenterAuthMiddleware(fileServer))
+	r.Handle("/", fileServer)
 }
 
 // engine returns the current story engine. Author mode swaps the pointer on
@@ -458,8 +452,7 @@ func (s *Server) reloadStoryEngine() error {
 
 // handleGetChapter returns a specific chapter by ID.
 func (s *Server) handleGetChapter(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	chapterID := vars["id"]
+	chapterID := r.PathValue("id")
 
 	chapter, err := s.engine().GetChapter(chapterID)
 	if err != nil {
@@ -746,8 +739,7 @@ func (s *Server) handleGoBack(w http.ResponseWriter, r *http.Request) {
 
 // handleGetResults returns voting results for a question.
 func (s *Server) handleGetResults(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	questionID := vars["questionId"]
+	questionID := r.PathValue("questionId")
 
 	results := s.voteManager.GetResults(questionID)
 
@@ -763,39 +755,46 @@ func (s *Server) handleGetResults(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleWebSocket handles WebSocket connections.
+// handleWebSocket handles WebSocket connections. The handler blocks on the
+// read loop so the request context stays alive for the connection's lifetime.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+	// allow all origins since this is designed to either run with a reverse proxy or locally
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
 		log.Printf("Failed to upgrade connection: %v", err)
 
 		return
 	}
 
-	s.voteManager.RegisterClient(conn)
+	ctx, cancel := context.WithCancel(r.Context())
+	c := s.voteManager.RegisterClient(conn)
 
-	// read messages from client
-	go func() {
-		defer func() {
-			s.voteManager.UnregisterClient(conn)
-			_ = conn.Close()
-		}()
+	defer func() {
+		// cancel first so writePump exits quietly instead of reporting a slow client
+		cancel()
+		s.voteManager.UnregisterClient(c)
 
-		for {
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-					log.Printf("WebSocket error: %v", err)
-				}
-
-				break
-			}
-
-			if err := s.voteManager.HandleVoteMessage(message); err != nil {
-				log.Printf("Error handling vote message: %v", err)
-			}
-		}
+		_ = conn.CloseNow()
 	}()
+
+	go c.writePump(ctx, s.pingInterval)
+
+	for {
+		_, message, err := conn.Read(ctx)
+		if err != nil {
+			switch websocket.CloseStatus(err) {
+			case -1, websocket.StatusNormalClosure, websocket.StatusGoingAway:
+			default:
+				log.Printf("WebSocket error: %v", err)
+			}
+
+			return
+		}
+
+		if err := s.voteManager.HandleVoteMessage(message); err != nil {
+			log.Printf("Error handling vote message: %v", err)
+		}
+	}
 }
 
 // Start starts the HTTP server.
