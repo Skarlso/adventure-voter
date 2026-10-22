@@ -2,7 +2,9 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,7 +14,8 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 )
 
 // testPNG is a 1x1 transparent PNG, small enough to inline and real enough for
@@ -105,10 +108,6 @@ type: game-over
 	if err != nil {
 		t.Fatalf("failed to create server: %v", err)
 	}
-
-	// NewServer already starts the vote manager. Starting a second one here gave
-	// two hubs draining the same broadcast channel, which raced on WriteJSON for
-	// a single connection (gorilla allows only one concurrent writer).
 
 	return server, tmpDir
 }
@@ -735,16 +734,18 @@ func TestWebSocketConnection(t *testing.T) {
 	// Convert http:// to ws://
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
 
+	ctx := t.Context()
+
 	// Connect WebSocket
-	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	ws, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		t.Fatalf("failed to connect websocket: %v", err)
 	}
-	defer ws.Close()
+	defer ws.CloseNow()
 
 	// Should receive initial state message
 	var msg Message
-	if err := ws.ReadJSON(&msg); err != nil {
+	if err := wsjson.Read(ctx, ws, &msg); err != nil {
 		t.Fatalf("failed to read state message: %v", err)
 	}
 
@@ -762,22 +763,24 @@ func TestWebSocketVoting(t *testing.T) {
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
 
-	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	ctx := t.Context()
+
+	ws, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		t.Fatalf("failed to connect websocket: %v", err)
 	}
-	defer ws.Close()
+	defer ws.CloseNow()
 
 	// Read initial state
 	var stateMsg Message
-	ws.ReadJSON(&stateMsg)
+	wsjson.Read(ctx, ws, &stateMsg)
 
 	// Start voting
 	server.voteManager.StartVoting("test-q", []string{"a", "b"}, 2*time.Second, nil)
 
 	// Should receive voting_started message
 	var startMsg Message
-	if err := ws.ReadJSON(&startMsg); err != nil {
+	if err := wsjson.Read(ctx, ws, &startMsg); err != nil {
 		t.Fatalf("failed to read voting_started message: %v", err)
 	}
 
@@ -792,18 +795,196 @@ func TestWebSocketVoting(t *testing.T) {
 		ChoiceID: "a",
 	}
 
-	if err := ws.WriteJSON(voteMsg); err != nil {
+	if err := wsjson.Write(ctx, ws, voteMsg); err != nil {
 		t.Fatalf("failed to send vote: %v", err)
 	}
 
 	// Should receive vote_update message
 	var updateMsg Message
-	if err := ws.ReadJSON(&updateMsg); err != nil {
+	if err := wsjson.Read(ctx, ws, &updateMsg); err != nil {
 		t.Fatalf("failed to read vote_update message: %v", err)
 	}
 
 	if updateMsg.Type != "vote_update" {
 		t.Errorf("message type = %q, want %q", updateMsg.Type, "vote_update")
+	}
+}
+
+// readMessages pumps a client connection into a channel. coder/websocket only
+// answers server pings while a Read is in flight.
+func readMessages(ctx context.Context, ws *websocket.Conn) <-chan Message {
+	out := make(chan Message, 64)
+
+	go func() {
+		defer close(out)
+
+		for {
+			var msg Message
+			if err := wsjson.Read(ctx, ws, &msg); err != nil {
+				return
+			}
+
+			out <- msg
+		}
+	}()
+
+	return out
+}
+
+func expectMessage(t *testing.T, msgs <-chan Message, wantType string) {
+	t.Helper()
+
+	timeout := time.After(2 * time.Second)
+
+	for {
+		select {
+		case msg, ok := <-msgs:
+			if !ok {
+				t.Fatalf("connection closed while waiting for %q", wantType)
+			}
+
+			if msg.Type == wantType {
+				return
+			}
+		case <-timeout:
+			t.Fatalf("timed out waiting for %q", wantType)
+		}
+	}
+}
+
+// Regression: a write error on one dead client used to deadlock the hub, after
+// which new clients connected "green" but never received anything.
+func TestWebSocketDeadClientDoesNotWedgeHub(t *testing.T) {
+	server, _ := setupTestServer(t)
+
+	ts := httptest.NewServer(server.router)
+	defer ts.Close()
+
+	ctx := t.Context()
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+
+	var raw net.Conn
+
+	dialer := &net.Dialer{}
+	httpClient := &http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			c, err := dialer.DialContext(ctx, network, addr)
+			raw = c
+
+			return c, err
+		},
+	}}
+
+	dead, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPClient: httpClient})
+	if err != nil {
+		t.Fatalf("failed to connect websocket: %v", err)
+	}
+	defer dead.CloseNow()
+
+	// drop the TCP connection without a close frame, like a phone losing wifi
+	_ = raw.Close()
+
+	for range 3 * clientSendBuffer {
+		server.voteManager.BroadcastMessage("tick", nil)
+	}
+
+	ws, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("failed to connect websocket: %v", err)
+	}
+	defer ws.CloseNow()
+
+	msgs := readMessages(ctx, ws)
+	expectMessage(t, msgs, "state")
+
+	started := make(chan struct{})
+
+	go func() {
+		defer close(started)
+		server.voteManager.StartVoting("q", []string{"a", "b"}, time.Minute, nil)
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("StartVoting blocked")
+	}
+	defer server.voteManager.StopVoting()
+
+	expectMessage(t, msgs, "voting_started")
+}
+
+// An idle socket must outlive http.Server's ReadTimeout, and pings must not
+// disturb a healthy client.
+func TestWebSocketStaysOpenWhileIdle(t *testing.T) {
+	server, _ := setupTestServer(t)
+	server.pingInterval = 20 * time.Millisecond
+
+	ts := httptest.NewUnstartedServer(server.router)
+	ts.Config.ReadTimeout = 100 * time.Millisecond
+	ts.Start()
+	defer ts.Close()
+
+	ctx := t.Context()
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+
+	ws, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("failed to connect websocket: %v", err)
+	}
+	defer ws.CloseNow()
+
+	msgs := readMessages(ctx, ws)
+	expectMessage(t, msgs, "state")
+
+	time.Sleep(300 * time.Millisecond)
+
+	server.voteManager.BroadcastMessage("still_here", nil)
+	expectMessage(t, msgs, "still_here")
+}
+
+func TestStaticRoutes(t *testing.T) {
+	server, _ := setupTestServer(t)
+	server.presenterSecret = "s3cret"
+	server.router = http.NewServeMux()
+	server.staticFS = fstest.MapFS{
+		"index.html":           &fstest.MapFile{Data: []byte("voter")},
+		"presenter/index.html": &fstest.MapFile{Data: []byte("presenter")},
+		"editor/index.html":    &fstest.MapFile{Data: []byte("editor")},
+	}
+	server.setupRoutes()
+
+	tests := []struct {
+		name     string
+		method   string
+		path     string
+		authed   bool
+		wantCode int
+	}{
+		{"presenter needs auth", "GET", "/presenter/", false, http.StatusUnauthorized},
+		{"presenter with auth", "GET", "/presenter/", true, http.StatusOK},
+		{"editor needs auth", "GET", "/editor/", false, http.StatusUnauthorized},
+		{"voter is public", "GET", "/", false, http.StatusOK},
+		{"media image", "GET", "/media/diagram.png", false, http.StatusOK},
+		{"media head", "HEAD", "/media/diagram.png", false, http.StatusOK},
+		{"media refuses chapter sources", "GET", "/media/intro.md", false, http.StatusNotFound},
+		{"unknown api route", "GET", "/api/nope", false, http.StatusNotFound},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			if tt.authed {
+				req.SetBasicAuth("presenter", "s3cret")
+			}
+
+			w := httptest.NewRecorder()
+			server.router.ServeHTTP(w, req)
+
+			if w.Code != tt.wantCode {
+				t.Errorf("status = %d, want %d", w.Code, tt.wantCode)
+			}
+		})
 	}
 }
 

@@ -29,14 +29,10 @@ func TestNewVoteManager(t *testing.T) {
 		t.Error("clients map should be initialized")
 	}
 
-	if vm.broadcast == nil {
-		t.Error("broadcast channel should be initialized")
-	}
 }
 
 func TestStartVoting(t *testing.T) {
 	vm := NewVoteManager()
-	go vm.Run()
 
 	questionID := "test-question"
 	choices := []string{"choice-a", "choice-b", "choice-c"}
@@ -84,7 +80,6 @@ func TestStartVoting(t *testing.T) {
 
 func TestStartVotingWithChoices(t *testing.T) {
 	vm := NewVoteManager()
-	go vm.Run()
 
 	questionID := "test-decision"
 	choiceIDs := []string{"opt-a", "opt-b"}
@@ -110,9 +105,7 @@ func TestStartVotingWithChoices(t *testing.T) {
 
 func TestSubmitVote(t *testing.T) {
 	vm := NewVoteManager()
-	go vm.Run()
-	// disarm rather than close: a pending AfterFunc still sends on this channel,
-	// and Run() spins forever once it is closed
+	// disarm so the pending AfterFunc cannot fire after the test returns
 	defer vm.StopVoting()
 
 	questionID := "test-question"
@@ -148,9 +141,7 @@ func TestSubmitVote(t *testing.T) {
 
 func TestSubmitVote_ChangeVote(t *testing.T) {
 	vm := NewVoteManager()
-	go vm.Run()
-	// disarm rather than close: a pending AfterFunc still sends on this channel,
-	// and Run() spins forever once it is closed
+	// disarm so the pending AfterFunc cannot fire after the test returns
 	defer vm.StopVoting()
 
 	questionID := "test-question"
@@ -196,9 +187,7 @@ func TestSubmitVote_WhenInactive(t *testing.T) {
 
 func TestEndVoting(t *testing.T) {
 	vm := NewVoteManager()
-	go vm.Run()
-	// disarm rather than close: a pending AfterFunc still sends on this channel,
-	// and Run() spins forever once it is closed
+	// disarm so the pending AfterFunc cannot fire after the test returns
 	defer vm.StopVoting()
 
 	questionID := "test-question"
@@ -283,9 +272,7 @@ func TestDetermineWinner(t *testing.T) {
 
 func TestGetResults(t *testing.T) {
 	vm := NewVoteManager()
-	go vm.Run()
-	// disarm rather than close: a pending AfterFunc still sends on this channel,
-	// and Run() spins forever once it is closed
+	// disarm so the pending AfterFunc cannot fire after the test returns
 	defer vm.StopVoting()
 
 	questionID := "test-question"
@@ -311,9 +298,7 @@ func TestGetResults(t *testing.T) {
 
 func TestResetVoting(t *testing.T) {
 	vm := NewVoteManager()
-	go vm.Run()
-	// disarm rather than close: a pending AfterFunc still sends on this channel,
-	// and Run() spins forever once it is closed
+	// disarm so the pending AfterFunc cannot fire after the test returns
 	defer vm.StopVoting()
 
 	// Start voting and submit some votes
@@ -342,9 +327,7 @@ func TestResetVoting(t *testing.T) {
 
 func TestClearQuestionVotes(t *testing.T) {
 	vm := NewVoteManager()
-	go vm.Run()
-	// disarm rather than close: a pending AfterFunc still sends on this channel,
-	// and Run() spins forever once it is closed
+	// disarm so the pending AfterFunc cannot fire after the test returns
 	defer vm.StopVoting()
 
 	// Create votes for multiple questions
@@ -371,9 +354,7 @@ func TestClearQuestionVotes(t *testing.T) {
 
 func TestHandleVoteMessage(t *testing.T) {
 	vm := NewVoteManager()
-	go vm.Run()
-	// disarm rather than close: a pending AfterFunc still sends on this channel,
-	// and Run() spins forever once it is closed
+	// disarm so the pending AfterFunc cannot fire after the test returns
 	defer vm.StopVoting()
 
 	vm.StartVoting("test-q", []string{"a", "b"}, 1*time.Second, nil)
@@ -418,9 +399,7 @@ func TestHandleVoteMessage(t *testing.T) {
 
 func TestConcurrentVoting(t *testing.T) {
 	vm := NewVoteManager()
-	go vm.Run()
-	// disarm rather than close: a pending AfterFunc still sends on this channel,
-	// and Run() spins forever once it is closed
+	// disarm so the pending AfterFunc cannot fire after the test returns
 	defer vm.StopVoting()
 
 	questionID := "concurrent-test"
@@ -460,24 +439,63 @@ func TestConcurrentVoting(t *testing.T) {
 func TestBroadcastMessage(t *testing.T) {
 	vm := NewVoteManager()
 
-	// deliberately no vm.Run(): the hub would race this test for the message and
-	// win often enough to make the assertion flaky. The channel is buffered, so
-	// BroadcastMessage lands without a reader.
+	c := newClient(nil)
+	vm.clients[c] = struct{}{}
+
 	vm.BroadcastMessage("test_event", map[string]any{
 		"key": "value",
 	})
 
 	select {
-	case msg := <-vm.broadcast:
+	case msg := <-c.send:
 		if msg.Type != "test_event" {
 			t.Errorf("message type = %q, want %q", msg.Type, "test_event")
 		}
 		if msg.Payload["key"] != "value" {
 			t.Errorf("payload[key] = %v, want %q", msg.Payload["key"], "value")
 		}
-	case <-time.After(100 * time.Millisecond):
-		t.Error("timeout waiting for broadcast message")
+	default:
+		t.Error("broadcast should queue the message without blocking")
 	}
+}
+
+// A client that stops draining its queue used to wedge the hub forever. Now it
+// gets dropped and everyone else keeps receiving.
+func TestBroadcastDropsStalledClient(t *testing.T) {
+	vm := NewVoteManager()
+
+	stalled := newClient(nil)
+	healthy := newClient(nil)
+	vm.clients[stalled] = struct{}{}
+	vm.clients[healthy] = struct{}{}
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		for range clientSendBuffer + 1 {
+			vm.BroadcastMessage("tick", nil)
+			<-healthy.send
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("broadcast blocked on a stalled client")
+	}
+
+	if _, ok := vm.clients[stalled]; ok {
+		t.Error("stalled client should have been dropped")
+	}
+
+	if _, ok := vm.clients[healthy]; !ok {
+		t.Error("healthy client should still be registered")
+	}
+
+	// unregistering an already dropped client must not double-close its queue
+	vm.UnregisterClient(stalled)
 }
 
 func TestMessageSerialization(t *testing.T) {
@@ -511,7 +529,6 @@ func TestMessageSerialization(t *testing.T) {
 
 func TestDetermineWinner_TieFollowsDeclarationOrder(t *testing.T) {
 	vm := NewVoteManager()
-	go vm.Run()
 
 	// opt-b is declared first, so it takes a tie even though "opt-a" sorts lower
 	vm.StartVotingWithChoices("q", []string{"opt-b", "opt-a"}, nil, "", time.Hour, nil)
@@ -529,7 +546,6 @@ func TestDetermineWinner_TieFollowsDeclarationOrder(t *testing.T) {
 
 func TestDetermineWinner_IgnoresUndeclaredChoices(t *testing.T) {
 	vm := NewVoteManager()
-	go vm.Run()
 
 	vm.StartVotingWithChoices("q", []string{"opt-a", "opt-b"}, nil, "", time.Hour, nil)
 
