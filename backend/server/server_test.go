@@ -1111,3 +1111,53 @@ func TestHandleAdvance_DisarmsPendingVote(t *testing.T) {
 		t.Error("advancing must disarm the pending vote so it cannot end on top of the next chapter")
 	}
 }
+
+func TestWebSocketVoterCount(t *testing.T) {
+	server, tmpDir := setupTestServer(t)
+	defer os.RemoveAll(tmpDir)
+
+	ts := httptest.NewServer(server.router)
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+
+	ctx := t.Context()
+
+	presenter, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("failed to connect presenter: %v", err)
+	}
+	defer presenter.CloseNow()
+
+	var msg Message
+	if err := wsjson.Read(ctx, presenter, &msg); err != nil {
+		t.Fatalf("failed to read state message: %v", err)
+	}
+
+	if msg.Type != "state" || msg.Payload["voter_count"] != float64(0) {
+		t.Fatalf("state = %+v, want voter_count 0", msg)
+	}
+
+	voter, _, err := websocket.Dial(ctx, wsURL+"?role=voter", nil)
+	if err != nil {
+		t.Fatalf("failed to connect voter: %v", err)
+	}
+
+	if err := wsjson.Read(ctx, presenter, &msg); err != nil {
+		t.Fatalf("failed to read voter_count: %v", err)
+	}
+
+	if msg.Type != "voter_count" || msg.Payload["count"] != float64(1) {
+		t.Errorf("after join = %+v, want voter_count 1", msg)
+	}
+
+	voter.Close(websocket.StatusNormalClosure, "")
+
+	if err := wsjson.Read(ctx, presenter, &msg); err != nil {
+		t.Fatalf("failed to read voter_count: %v", err)
+	}
+
+	if msg.Type != "voter_count" || msg.Payload["count"] != float64(0) {
+		t.Errorf("after leave = %+v, want voter_count 0", msg)
+	}
+}

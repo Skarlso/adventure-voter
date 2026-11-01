@@ -20,14 +20,16 @@ const (
 
 // client is one websocket connection. Only writePump writes to conn.
 type client struct {
-	conn *websocket.Conn
-	send chan *Message
+	conn  *websocket.Conn
+	send  chan *Message
+	voter bool
 }
 
-func newClient(conn *websocket.Conn) *client {
+func newClient(conn *websocket.Conn, voter bool) *client {
 	return &client{
-		conn: conn,
-		send: make(chan *Message, clientSendBuffer),
+		conn:  conn,
+		send:  make(chan *Message, clientSendBuffer),
+		voter: voter,
 	}
 }
 

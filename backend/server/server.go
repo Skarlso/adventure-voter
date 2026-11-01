@@ -757,6 +757,7 @@ func (s *Server) handleGetResults(w http.ResponseWriter, r *http.Request) {
 
 // handleWebSocket handles WebSocket connections. The handler blocks on the
 // read loop so the request context stays alive for the connection's lifetime.
+// Voter pages connect with ?role=voter so they count toward voter_count.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// allow all origins since this is designed to either run with a reverse proxy or locally
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
@@ -767,7 +768,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx, cancel := context.WithCancel(r.Context())
-	c := s.voteManager.RegisterClient(conn)
+	c := s.voteManager.RegisterClient(conn, r.URL.Query().Get("role") == "voter")
 
 	defer func() {
 		// cancel first so writePump exits quietly instead of reporting a slow client

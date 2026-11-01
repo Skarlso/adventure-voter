@@ -439,7 +439,7 @@ func TestConcurrentVoting(t *testing.T) {
 func TestBroadcastMessage(t *testing.T) {
 	vm := NewVoteManager()
 
-	c := newClient(nil)
+	c := newClient(nil, false)
 	vm.clients[c] = struct{}{}
 
 	vm.BroadcastMessage("test_event", map[string]any{
@@ -464,8 +464,8 @@ func TestBroadcastMessage(t *testing.T) {
 func TestBroadcastDropsStalledClient(t *testing.T) {
 	vm := NewVoteManager()
 
-	stalled := newClient(nil)
-	healthy := newClient(nil)
+	stalled := newClient(nil, false)
+	healthy := newClient(nil, false)
 	vm.clients[stalled] = struct{}{}
 	vm.clients[healthy] = struct{}{}
 
@@ -557,4 +557,82 @@ func TestDetermineWinner_IgnoresUndeclaredChoices(t *testing.T) {
 	}
 
 	vm.StopVoting()
+}
+
+func TestVoterCount(t *testing.T) {
+	vm := NewVoteManager()
+
+	presenter := vm.RegisterClient(nil, false)
+	if msg := <-presenter.send; msg.Type != "state" || msg.Payload["voter_count"] != 0 {
+		t.Fatalf("presenter state = %+v, want voter_count 0", msg)
+	}
+
+	voter := vm.RegisterClient(nil, true)
+
+	if msg := <-presenter.send; msg.Type != "voter_count" || msg.Payload["count"] != 1 {
+		t.Errorf("after join = %+v, want voter_count 1", msg)
+	}
+
+	if msg := <-voter.send; msg.Type != "state" || msg.Payload["voter_count"] != 1 {
+		t.Errorf("voter state = %+v, want voter_count 1", msg)
+	}
+
+	select {
+	case msg := <-voter.send:
+		t.Errorf("new voter got an extra message: %+v", msg)
+	default:
+	}
+
+	vm.UnregisterClient(voter)
+
+	if msg := <-presenter.send; msg.Type != "voter_count" || msg.Payload["count"] != 0 {
+		t.Errorf("after leave = %+v, want voter_count 0", msg)
+	}
+
+	// a non-voter leaving must not announce anything
+	other := vm.RegisterClient(nil, false)
+	<-other.send
+	vm.UnregisterClient(other)
+
+	select {
+	case msg := <-presenter.send:
+		t.Errorf("non-voter join/leave broadcast %+v", msg)
+	default:
+	}
+}
+
+func TestVoterCountDropsStalledVoter(t *testing.T) {
+	vm := NewVoteManager()
+
+	presenter := vm.RegisterClient(nil, false)
+	<-presenter.send
+
+	stalled := vm.RegisterClient(nil, true)
+	<-presenter.send
+
+	for range clientSendBuffer - 1 {
+		vm.BroadcastMessage("tick", nil)
+		<-presenter.send
+	}
+
+	// stalled's queue is now full, so this broadcast drops it
+	vm.BroadcastMessage("tick", nil)
+	<-presenter.send
+
+	select {
+	case msg := <-presenter.send:
+		if msg.Type != "voter_count" || msg.Payload["count"] != 0 {
+			t.Errorf("after drop = %+v, want voter_count 0", msg)
+		}
+	default:
+		t.Error("dropping a voter should broadcast the new count")
+	}
+
+	vm.UnregisterClient(stalled)
+
+	select {
+	case msg := <-presenter.send:
+		t.Errorf("unregistering a dropped voter broadcast %+v", msg)
+	default:
+	}
 }
