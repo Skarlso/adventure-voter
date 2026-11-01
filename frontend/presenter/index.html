@@ -136,6 +136,11 @@
                         <span x-text="totalVotes"></span> votes
                     </div>
 
+                    <!-- Connected Voters -->
+                    <div class="pixel-badge bg-neutral-800 text-white">
+                        <span x-text="voterCount"></span> <span x-text="voterCount === 1 ? 'voter' : 'voters'"></span>
+                    </div>
+
                     <!-- QR Code (click to enlarge) -->
                     <button @click="showQRModal = true"
                             title="Show voter QR code"
@@ -359,6 +364,7 @@
                 choices: [],
                 results: {},
                 totalVotes: 0,
+                voterCount: 0,
                 winner: null,
                 timeRemaining: 0,
                 totalTime: 60,
@@ -504,6 +510,12 @@
                     console.log('Received message:', message);
 
                     switch (message.type) {
+                        case 'state':
+                            this.voterCount = message.payload.voter_count || 0;
+                            break;
+                        case 'voter_count':
+                            this.voterCount = message.payload.count;
+                            break;
                         case 'voting_started':
                             this.onVotingStarted(message.payload);
                             break;

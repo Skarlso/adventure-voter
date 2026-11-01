@@ -24,6 +24,7 @@ type VoteManager struct {
 	voters          map[string]string         // voterID -> choiceID (for current question)
 	clientsMu       sync.Mutex
 	clients         map[*client]struct{}
+	connectedVoters int
 	timer           *time.Timer
 	timerDuration   time.Duration
 	votingActive    bool
@@ -51,14 +52,47 @@ func (vm *VoteManager) broadcast(message *Message) {
 	vm.clientsMu.Lock()
 	defer vm.clientsMu.Unlock()
 
-	for c := range vm.clients {
-		select {
-		case c.send <- message:
-		default:
-			log.Printf("Dropping websocket client: send queue full")
-			delete(vm.clients, c)
-			close(c.send)
+	vm.broadcastLocked(message)
+}
+
+// broadcastLocked is broadcast for callers holding clientsMu.
+func (vm *VoteManager) broadcastLocked(message *Message) {
+	for message != nil {
+		before := vm.connectedVoters
+
+		for c := range vm.clients {
+			select {
+			case c.send <- message:
+			default:
+				log.Printf("Dropping websocket client: send queue full")
+				vm.removeClientLocked(c)
+			}
 		}
+
+		message = nil
+		if vm.connectedVoters != before {
+			message = vm.voterCountMessage()
+		}
+	}
+}
+
+// removeClientLocked drops c from the hub. Needs `clientsMu` lock.
+func (vm *VoteManager) removeClientLocked(c *client) {
+	delete(vm.clients, c)
+	close(c.send)
+
+	if c.voter {
+		vm.connectedVoters--
+	}
+}
+
+// voterCountMessage reports how many voters are connected. Needs `clientsMu` lock.
+func (vm *VoteManager) voterCountMessage() *Message {
+	return &Message{
+		Type: "voter_count",
+		Payload: map[string]any{
+			"count": vm.connectedVoters,
+		},
 	}
 }
 
@@ -233,11 +267,12 @@ func (vm *VoteManager) broadcastResults() {
 }
 
 // stateMessage snapshots the voting state for a newly connected client.
-// Callers must hold vm.mu.
+// Lock vm.mu and clientsMu.
 func (vm *VoteManager) stateMessage() *Message {
 	state := map[string]any{
 		"voting_active": vm.votingActive,
 		"question_id":   vm.currentQuestion,
+		"voter_count":   vm.connectedVoters,
 	}
 
 	// cloned because the writer serializes it later, outside the lock
@@ -267,14 +302,20 @@ func (vm *VoteManager) GetResults(questionID string) map[string]int {
 }
 
 // RegisterClient adds a WebSocket client and queues the current state for it.
-func (vm *VoteManager) RegisterClient(conn *websocket.Conn) *client {
-	c := newClient(conn)
+// Announces new voters.
+func (vm *VoteManager) RegisterClient(conn *websocket.Conn, voter bool) *client {
+	c := newClient(conn, voter)
 
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
 
 	vm.clientsMu.Lock()
 	defer vm.clientsMu.Unlock()
+
+	if voter {
+		vm.connectedVoters++
+		vm.broadcastLocked(vm.voterCountMessage())
+	}
 
 	c.send <- vm.stateMessage()
 
@@ -290,8 +331,11 @@ func (vm *VoteManager) UnregisterClient(c *client) {
 	defer vm.clientsMu.Unlock()
 
 	if _, ok := vm.clients[c]; ok {
-		delete(vm.clients, c)
-		close(c.send)
+		vm.removeClientLocked(c)
+
+		if c.voter {
+			vm.broadcastLocked(vm.voterCountMessage())
+		}
 	}
 }
 
